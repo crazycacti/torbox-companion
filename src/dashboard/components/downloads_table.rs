@@ -3570,18 +3570,6 @@ pub fn DownloadsTable(
                                                         }
                                                     }
                                                 </Show>
-                                                
-                                                // Season episodes dropdown - TODO: Implement this feature
-                                                // <Show when=move || download.is_season && is_expanded()>
-                                                //     <tr>
-                                                //         <td colspan="7" class="px-6 py-4 bg-slate-700/20">
-                                                //             <div class="space-y-2">
-                                                //                 <h4 class="text-sm font-medium text-slate-300 mb-3">"Episodes"</h4>
-                                                //                 <p class="text-sm text-slate-400">"Episode list coming soon..."</p>
-                                                //             </div>
-                                                //         </td>
-                                                //     </tr>
-                                                // </Show>
                                             </>
                                         }
                                     }
