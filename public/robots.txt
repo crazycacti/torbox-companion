@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://torbox-companion.app/sitemap.xml
+
+# Crawl-delay for respectful crawling
+Crawl-delay: 1
+
+# Disallow sensitive areas (if any)
+Disallow: /api/
+Disallow: /pkg/
+Disallow: /target/

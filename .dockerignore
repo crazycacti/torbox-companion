@@ -1,0 +1,67 @@
+# Rust build artifacts (excluded, rebuilt in container)
+target/
+!target/site/pkg/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# Documentation
+README.md
+docs/
+*.md
+!README.md
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+.directory
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Tests
+tests/
+test/
+**/*_test.rs
+**/*_tests.rs
+
+# Build scripts
+build.sh
+build.ps1
+*.sh
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Project review (generated)
+PROJECT_REVIEW.md

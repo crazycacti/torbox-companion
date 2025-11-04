@@ -1,0 +1,152 @@
+name: Auto Version and Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      custom_version:
+        description: 'Custom version (e.g., 1.2.3) - overrides version_type'
+        required: false
+        type: string
+
+jobs:
+  version-and-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Get current version
+        id: current_version
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          
+          # Extract version number (remove 'v' prefix)
+          VERSION_NUMBER=${LATEST_TAG#v}
+          echo "version_number=$VERSION_NUMBER" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION_NUMBER"
+
+      - name: Calculate new version
+        id: new_version
+        run: |
+          CURRENT_VERSION="${{ steps.current_version.outputs.version_number }}"
+          
+          if [ -n "${{ github.event.inputs.custom_version }}" ]; then
+            NEW_VERSION="${{ github.event.inputs.custom_version }}"
+            echo "Using custom version: $NEW_VERSION"
+          else
+            # Split version into major.minor.patch
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            
+            case "${{ github.event.inputs.version_type }}" in
+              "major")
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              "minor")
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              "patch")
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+            
+            NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+            echo "Bumping ${{ github.event.inputs.version_type }} version: $CURRENT_VERSION -> $NEW_VERSION"
+          fi
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update Cargo.toml version
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+          echo "Updated Cargo.toml version to $NEW_VERSION"
+
+      - name: Commit and tag
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          NEW_TAG="${{ steps.new_version.outputs.new_tag }}"
+          
+          # Add changes
+          git add Cargo.toml
+          
+          # Commit
+          git commit -m "chore: bump version to $NEW_VERSION"
+          
+          # Create tag
+          git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
+          
+          # Push changes and tag
+          git push origin main
+          git push origin "$NEW_TAG"
+          
+          echo "Created and pushed tag: $NEW_TAG"
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.new_version.outputs.new_tag }}
+          release_name: Release ${{ steps.new_version.outputs.new_tag }}
+          body: |
+            ## Torbox Companion ${{ steps.new_version.outputs.new_tag }}
+            
+            ### Docker Images
+            
+            Multi-architecture Docker images are available on GitHub Container Registry:
+            
+            ```bash
+            # Pull the latest version
+            docker pull ghcr.io/${{ github.repository }}:latest
+            
+            # Pull specific version
+            docker pull ghcr.io/${{ github.repository }}:${{ steps.new_version.outputs.new_version }}
+            
+            # Run the container
+            docker run -d -p 3000:3000 --name torbox-companion ghcr.io/${{ github.repository }}:latest
+            ```
+            
+            ### Supported Architectures
+            
+            - `linux/amd64` (Intel/AMD 64-bit)
+            - `linux/arm64` (ARM 64-bit)
+            
+            ### Installation
+            
+            ```bash
+            # Using Docker Compose
+            docker compose up -d
+            ```
+            
+            ### Changes
+            
+            This release includes various improvements and bug fixes.
+          draft: false
+          prerelease: false
