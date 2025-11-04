@@ -916,13 +916,18 @@ pub fn DownloadsTable(
                                 let torrents_future = client.get_torrent_list(None, Some(false), None, None);
                                 let web_downloads_future = client.get_web_download_list(None, Some(false), None, None);
                                 let usenet_future = client.get_usenet_download_list(None, Some(false), None, None);
-                                let queued_future = client.get_queued_downloads(None, None, Some(false), None, None);
+
+                                let queued_torrents_future = client.get_queued_downloads(Some("torrent".to_string()), None, Some(false), None, None);
+                                let queued_usenet_future = client.get_queued_downloads(Some("usenet".to_string()), None, Some(false), None, None);
+                                let queued_webdl_future = client.get_queued_downloads(Some("webdl".to_string()), None, Some(false), None, None);
                                 
-                                let (torrents_result, web_result, usenet_result, queued_result) = futures::join!(
+                                let (torrents_result, web_result, usenet_result, queued_torrents_result, queued_usenet_result, queued_webdl_result) = futures::join!(
                                     torrents_future,
                                     web_downloads_future,
                                     usenet_future,
-                                    queued_future
+                                    queued_torrents_future,
+                                    queued_usenet_future,
+                                    queued_webdl_future
                                 );
                                 
                                 const UPDATE_THRESHOLD: usize = 20;
@@ -1001,71 +1006,114 @@ pub fn DownloadsTable(
                                 
                                 yield_to_browser().await;
                                 
-                                match queued_result {
+
+                                match queued_torrents_result {
                                     Ok(response) => {
                                         if let Some(data) = response.data {
-                                            if let Ok(items) = serde_json::from_value::<Vec<serde_json::Value>>(data) {
-                                                for item in items.into_iter() {
-                                                    if item.get("seeds").is_some() {
-                                                        if let Ok(mut torrent) = serde_json::from_value::<Torrent>(item.clone()) {
-                                                            torrent.download_state = "queued".to_string();
-                                                            all_downloads.push(DownloadItem::from(torrent));
-                                                            total_processed += 1;
-                                                            if total_processed % UPDATE_THRESHOLD == 0 {
-                                                                downloads_clone.set(all_downloads.clone());
-                                                                yield_to_browser().await;
-                                                            } else if total_processed % MICROTASK_YIELD == 0 {
-                                                                yield_microtask().await;
-                                                            }
-                                                            continue;
+                                            // Handle both array response (when type is specified) and nested object (when no type)
+                                            let torrents_array = if let Some(arr) = data.as_array() {
+                                                Some(arr.clone())
+                                            } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                                queued_data.get("torrents").and_then(|v| v.as_array()).cloned()
+                                            } else {
+                                                None
+                                            };
+                                            
+                                            if let Some(torrents_array) = torrents_array {
+                                                for item in torrents_array {
+                                                    if let Ok(mut torrent) = serde_json::from_value::<Torrent>(item.clone()) {
+                                                        torrent.download_state = "queued".to_string();
+                                                        all_downloads.push(DownloadItem::from(torrent));
+                                                        total_processed += 1;
+                                                        if total_processed % UPDATE_THRESHOLD == 0 {
+                                                            downloads_clone.set(all_downloads.clone());
+                                                            yield_to_browser().await;
+                                                        } else if total_processed % MICROTASK_YIELD == 0 {
+                                                            yield_microtask().await;
                                                         }
-                                                    }
-                                                    
-                                                    if item.get("download_id").is_some() {
-                                                        if let Ok(mut usenet) = serde_json::from_value::<UsenetDownload>(item.clone()) {
-                                                            usenet.download_state = "queued".to_string();
-                                                            all_downloads.push(DownloadItem::from(usenet));
-                                                            total_processed += 1;
-                                                            if total_processed % UPDATE_THRESHOLD == 0 {
-                                                                downloads_clone.set(all_downloads.clone());
-                                                                yield_to_browser().await;
-                                                            } else if total_processed % MICROTASK_YIELD == 0 {
-                                                                yield_microtask().await;
-                                                            }
-                                                            continue;
-                                                        }
-                                                    }
-                                                    
-                                                    let has_download_state = item.get("download_state").is_some();
-                                                    if item.get("url").is_some() && item.get("status").is_some() && !has_download_state {
-                                                        if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
-                                                            web_dl.status = "queued".to_string();
-                                                            all_downloads.push(DownloadItem::from(web_dl));
-                                                            total_processed += 1;
-                                                            if total_processed % UPDATE_THRESHOLD == 0 {
-                                                                downloads_clone.set(all_downloads.clone());
-                                                                yield_to_browser().await;
-                                                            } else if total_processed % MICROTASK_YIELD == 0 {
-                                                                yield_microtask().await;
-                                                            }
-                                                            continue;
-                                                        }
-                                                    }
-                                                    
-                                                    total_processed += 1;
-                                                    if total_processed % UPDATE_THRESHOLD == 0 {
-                                                        downloads_clone.set(all_downloads.clone());
-                                                        yield_to_browser().await;
-                                                    } else if total_processed % MICROTASK_YIELD == 0 {
-                                                        yield_microtask().await;
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        log!("Queued downloads API error: {:?}", e);
-                                        api_errors.push(format!("Failed to fetch queued downloads: {}", e));
+                                        log!("Queued torrents API error: {:?}", e);
+                                        api_errors.push(format!("Failed to fetch queued torrents: {}", e));
+                                    }
+                                }
+                                
+                                yield_to_browser().await;
+                                
+                                match queued_usenet_result {
+                                    Ok(response) => {
+                                        if let Some(data) = response.data {
+                                            // Handle both array response (when type is specified) and nested object (when no type)
+                                            let usenet_array = if let Some(arr) = data.as_array() {
+                                                Some(arr.clone())
+                                            } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                                queued_data.get("usenet").and_then(|v| v.as_array()).cloned()
+                                            } else {
+                                                None
+                                            };
+                                            
+                                            if let Some(usenet_array) = usenet_array {
+                                                for item in usenet_array {
+                                                    if let Ok(mut usenet) = serde_json::from_value::<UsenetDownload>(item.clone()) {
+                                                        usenet.download_state = "queued".to_string();
+                                                        all_downloads.push(DownloadItem::from(usenet));
+                                                        total_processed += 1;
+                                                        if total_processed % UPDATE_THRESHOLD == 0 {
+                                                            downloads_clone.set(all_downloads.clone());
+                                                            yield_to_browser().await;
+                                                        } else if total_processed % MICROTASK_YIELD == 0 {
+                                                            yield_microtask().await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log!("Queued usenet API error: {:?}", e);
+                                        api_errors.push(format!("Failed to fetch queued usenet downloads: {}", e));
+                                    }
+                                }
+                                
+                                yield_to_browser().await;
+                                
+                                // Process queued web downloads
+                                match queued_webdl_result {
+                                    Ok(response) => {
+                                        if let Some(data) = response.data {
+                                            // Handle both array response (when type is specified) and nested object (when no type)
+                                            let webdl_array = if let Some(arr) = data.as_array() {
+                                                Some(arr.clone())
+                                            } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                                queued_data.get("webdl").and_then(|v| v.as_array()).cloned()
+                                            } else {
+                                                None
+                                            };
+                                            
+                                            if let Some(webdl_array) = webdl_array {
+                                                for item in webdl_array {
+                                                    if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
+                                                        web_dl.status = "queued".to_string();
+                                                        all_downloads.push(DownloadItem::from(web_dl));
+                                                        total_processed += 1;
+                                                        if total_processed % UPDATE_THRESHOLD == 0 {
+                                                            downloads_clone.set(all_downloads.clone());
+                                                            yield_to_browser().await;
+                                                        } else if total_processed % MICROTASK_YIELD == 0 {
+                                                            yield_microtask().await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log!("Queued web downloads API error: {:?}", e);
+                                        api_errors.push(format!("Failed to fetch queued web downloads: {}", e));
                                     }
                                 }
                                 
@@ -1189,7 +1237,9 @@ pub fn DownloadsTable(
                     if let Ok(Some(storage)) = window.local_storage() {
                         if let Ok(Some(api_key)) = storage.get_item("api_key") {
                             if !api_key.is_empty() {
-                                let client = TorboxClient::new(api_key);
+                                // Use the same API key for the entire polling cycle
+                                let api_key_clone = api_key.clone();
+                                let client = TorboxClient::new(api_key_clone);
                                 let current_downloads = downloads_poll.get();
                                 
                                 let mut current_map: std::collections::HashMap<(i32, DownloadType), usize> = std::collections::HashMap::new();
@@ -1197,16 +1247,22 @@ pub fn DownloadsTable(
                                     current_map.insert((item.id, item.download_type.clone()), idx);
                                 }
                                 
-                                let torrents_future = client.get_torrent_list(None, Some(true), None, None);
-                                let web_downloads_future = client.get_web_download_list(None, Some(true), None, None);
-                                let usenet_future = client.get_usenet_download_list(None, Some(true), None, None);
-                                let queued_future = client.get_queued_downloads(None, None, Some(true), None, None);
+                                // Use bypass_cache: false for consistency with initial fetch and to avoid wrong cached data
+                                let torrents_future = client.get_torrent_list(None, Some(false), None, None);
+                                let web_downloads_future = client.get_web_download_list(None, Some(false), None, None);
+                                let usenet_future = client.get_usenet_download_list(None, Some(false), None, None);
+
+                                let queued_torrents_future = client.get_queued_downloads(Some("torrent".to_string()), None, Some(false), None, None);
+                                let queued_usenet_future = client.get_queued_downloads(Some("usenet".to_string()), None, Some(false), None, None);
+                                let queued_webdl_future = client.get_queued_downloads(Some("webdl".to_string()), None, Some(false), None, None);
                                 
-                                let (torrents_result, web_result, usenet_result, queued_result) = futures::join!(
+                                let (torrents_result, web_result, usenet_result, queued_torrents_result, queued_usenet_result, queued_webdl_result) = futures::join!(
                                     torrents_future,
                                     web_downloads_future,
                                     usenet_future,
-                                    queued_future
+                                    queued_torrents_future,
+                                    queued_usenet_future,
+                                    queued_webdl_future
                                 );
                                 
                                 let mut updated_downloads = current_downloads.clone();
@@ -1260,48 +1316,92 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 
-                                if let Ok(response) = queued_result {
+                                // Process queued torrents
+                                if let Ok(response) = queued_torrents_result {
                                     if let Some(data) = response.data {
-                                        if let Ok(items) = serde_json::from_value::<Vec<serde_json::Value>>(data) {
-                                            for item in items {
-                                                if item.get("seeds").is_some() {
-                                                    if let Ok(mut torrent) = serde_json::from_value::<Torrent>(item.clone()) {
-                                                        torrent.download_state = "queued".to_string();
-                                                        let item = DownloadItem::from(torrent);
-                                                        let key = (item.id, item.download_type.clone());
-                                                        seen_ids.insert(key.clone());
-                                                        
-                                                        if let Some(&idx) = current_map.get(&key) {
-                                                            updated_downloads[idx] = item;
-                                                        } else {
-                                                            updated_downloads.push(item);
-                                                        }
+                                        // Handle both array response (when type is specified) and nested object (when no type)
+                                        let torrents_array = if let Some(arr) = data.as_array() {
+                                            Some(arr.clone())
+                                        } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                            queued_data.get("torrents").and_then(|v| v.as_array()).cloned()
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        if let Some(torrents_array) = torrents_array {
+                                            for item in torrents_array {
+                                                if let Ok(mut torrent) = serde_json::from_value::<Torrent>(item.clone()) {
+                                                    torrent.download_state = "queued".to_string();
+                                                    let item = DownloadItem::from(torrent);
+                                                    let key = (item.id, item.download_type.clone());
+                                                    seen_ids.insert(key.clone());
+                                                    
+                                                    if let Some(&idx) = current_map.get(&key) {
+                                                        updated_downloads[idx] = item;
+                                                    } else {
+                                                        updated_downloads.push(item);
                                                     }
-                                                } else if item.get("download_id").is_some() {
-                                                    if let Ok(mut usenet) = serde_json::from_value::<UsenetDownload>(item.clone()) {
-                                                        usenet.download_state = "queued".to_string();
-                                                        let item = DownloadItem::from(usenet);
-                                                        let key = (item.id, item.download_type.clone());
-                                                        seen_ids.insert(key.clone());
-                                                        
-                                                        if let Some(&idx) = current_map.get(&key) {
-                                                            updated_downloads[idx] = item;
-                                                        } else {
-                                                            updated_downloads.push(item);
-                                                        }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Process queued usenet
+                                if let Ok(response) = queued_usenet_result {
+                                    if let Some(data) = response.data {
+                                        // Handle both array response (when type is specified) and nested object (when no type)
+                                        let usenet_array = if let Some(arr) = data.as_array() {
+                                            Some(arr.clone())
+                                        } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                            queued_data.get("usenet").and_then(|v| v.as_array()).cloned()
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        if let Some(usenet_array) = usenet_array {
+                                            for item in usenet_array {
+                                                if let Ok(mut usenet) = serde_json::from_value::<UsenetDownload>(item.clone()) {
+                                                    usenet.download_state = "queued".to_string();
+                                                    let item = DownloadItem::from(usenet);
+                                                    let key = (item.id, item.download_type.clone());
+                                                    seen_ids.insert(key.clone());
+                                                    
+                                                    if let Some(&idx) = current_map.get(&key) {
+                                                        updated_downloads[idx] = item;
+                                                    } else {
+                                                        updated_downloads.push(item);
                                                     }
-                                                } else if item.get("url").is_some() && item.get("status").is_some() && !item.get("download_state").is_some() {
-                                                    if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
-                                                        web_dl.status = "queued".to_string();
-                                                        let item = DownloadItem::from(web_dl);
-                                                        let key = (item.id, item.download_type.clone());
-                                                        seen_ids.insert(key.clone());
-                                                        
-                                                        if let Some(&idx) = current_map.get(&key) {
-                                                            updated_downloads[idx] = item;
-                                                        } else {
-                                                            updated_downloads.push(item);
-                                                        }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Process queued web downloads
+                                if let Ok(response) = queued_webdl_result {
+                                    if let Some(data) = response.data {
+                                        // Handle both array response (when type is specified) and nested object (when no type)
+                                        let webdl_array = if let Some(arr) = data.as_array() {
+                                            Some(arr.clone())
+                                        } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                            queued_data.get("webdl").and_then(|v| v.as_array()).cloned()
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        if let Some(webdl_array) = webdl_array {
+                                            for item in webdl_array {
+                                                if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
+                                                    web_dl.status = "queued".to_string();
+                                                    let item = DownloadItem::from(web_dl);
+                                                    let key = (item.id, item.download_type.clone());
+                                                    seen_ids.insert(key.clone());
+                                                    
+                                                    if let Some(&idx) = current_map.get(&key) {
+                                                        updated_downloads[idx] = item;
+                                                    } else {
+                                                        updated_downloads.push(item);
                                                     }
                                                 }
                                             }
@@ -2094,7 +2194,7 @@ pub fn DownloadsTable(
                                     
                                     let stream_type = match download_type {
                                         DownloadType::Torrent => "torrent",
-                                        DownloadType::WebDownload => "webdl",
+                                        DownloadType::WebDownload => "webdownload",
                                         DownloadType::Usenet => "usenet",
                                     };
                                     
