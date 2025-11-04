@@ -921,7 +921,25 @@ pub fn SearchComponent() -> impl IntoView {
                                         >
                                             <td class="px-4 md:px-6 py-4" style="color: var(--text-primary);">
                                                 <div class="flex flex-col gap-2">
-                                                    <span class="font-semibold text-sm sm:text-base leading-tight" style="color: var(--text-primary);">{item_title.title()}</span>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="font-semibold text-sm sm:text-base leading-tight" style="color: var(--text-primary);">{item_title.title()}</span>
+                                                        {move || {
+                                                            match &item_title {
+                                                                SearchResultItem::Torrent(t) => {
+                                                                    if t.private.unwrap_or(false) {
+                                                                        view! {
+                                                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Private Tracker" style="color: #f97316;">
+                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                                                            </svg>
+                                                                        }.into_any()
+                                                                    } else {
+                                                                        view! {}.into_any()
+                                                                    }
+                                                                }
+                                                                SearchResultItem::Usenet(_) => view! {}.into_any(),
+                                                            }
+                                                        }}
+                                                    </div>
                                                     <div class="flex flex-col gap-1.5">
                                                         <span class="text-xs sm:text-sm font-mono leading-relaxed" style="color: var(--text-secondary); opacity: 0.85; word-break: break-all;">
                                                             {move || {

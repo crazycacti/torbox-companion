@@ -34,6 +34,7 @@ pub struct DownloadItem {
     pub season_info: Option<SeasonInfo>,
     pub eta: Option<i32>,
     pub total_downloaded: Option<i64>,
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -326,6 +327,7 @@ impl From<Torrent> for DownloadItem {
             season_info,
             eta: Some(torrent.eta),
             total_downloaded: Some(torrent.total_downloaded),
+            private: torrent.private,
         }
     }
 }
@@ -397,6 +399,7 @@ impl From<WebDownload> for DownloadItem {
             season_info,
             eta: None, // Web downloads don't have ETA
             total_downloaded: None, // Web downloads don't have total_downloaded, calculate from progress
+            private: false, // Web downloads are not private trackers
         }
     }
 }
@@ -493,6 +496,7 @@ impl From<UsenetDownload> for DownloadItem {
             season_info,
             eta: Some(usenet.eta),
             total_downloaded: None, // Usenet doesn't have total_downloaded, calculate from progress
+            private: false, // Usenet downloads are not private trackers
         }
     }
 }
@@ -3112,7 +3116,14 @@ pub fn DownloadsTable(
                                                                 <div class="w-4 flex-shrink-0"></div>
                                                             </Show>
                                                             <div class="w-full">
-                                                                        <p class={move || format!("text-sm font-medium text-white truncate {}", if is_blurred.get() { "blur-sm select-none" } else { "" })} style={move || format!("word-break: break-all; {}", if is_blurred.get() { "filter: blur(4px);" } else { "" })} title={move || if is_blurred.get() { "Hidden".to_string() } else { download.name.clone() }}>{download.name.clone()}</p>
+                                                                        <div class="flex items-center gap-2">
+                                                                            <p class={move || format!("text-sm font-medium text-white truncate {}", if is_blurred.get() { "blur-sm select-none" } else { "" })} style={move || format!("word-break: break-all; {}", if is_blurred.get() { "filter: blur(4px);" } else { "" })} title={move || if is_blurred.get() { "Hidden".to_string() } else { download.name.clone() }}>{download.name.clone()}</p>
+                                                                            <Show when=move || download.private && download.download_type == DownloadType::Torrent>
+                                                                                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Private Tracker" style="color: #f97316;">
+                                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                                                                </svg>
+                                                                            </Show>
+                                                                        </div>
                                                                 <p class={move || format!("text-xs text-slate-400 {}", if is_blurred.get() { "blur-sm select-none" } else { "" })} style={move || if is_blurred.get() { "filter: blur(4px);" } else { "" }}>
                                                                     {format!("ID: {}", download.id)}
                                                                 </p>

@@ -451,6 +451,8 @@ pub struct SearchTorrent {
     pub owned: Option<bool>,
     #[serde(rename = "upload_date")]
     pub upload_date: Option<String>,
+    #[serde(default)]
+    pub private: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

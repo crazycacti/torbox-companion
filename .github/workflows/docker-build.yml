@@ -130,7 +130,7 @@ jobs:
       - name: Upload digest artifact
         uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.platform }}
+          name: digest-${{ env.CACHE_TAG }}
           path: ${{ env.DIGEST_FILE }}
           retention-days: 1
 
