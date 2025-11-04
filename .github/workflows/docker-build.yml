@@ -93,6 +93,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Set cache tag
+        run: |
+          CACHE_TAG=$(echo "${{ matrix.platform }}" | tr '/' '-')
+          echo "CACHE_TAG=${CACHE_TAG}" >> $GITHUB_ENV
+
       - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v5
@@ -104,10 +109,10 @@ jobs:
           labels: ${{ needs.prepare.outputs.labels }}
           cache-from: |
             type=gha,scope=${{ matrix.platform }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.platform }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ env.CACHE_TAG }}
           cache-to: |
             type=gha,mode=max,scope=${{ matrix.platform }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.platform }},mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ env.CACHE_TAG }},mode=max
           build-args: |
             BUILD_DATE=${{ needs.prepare.outputs.created }}
             VCS_REF=${{ github.sha }}
