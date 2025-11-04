@@ -16,7 +16,7 @@ leptos_meta = { version = "0.8.0" }
 tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
 wasm-bindgen = { version = "=0.2.105", optional = true }
 js-sys = { version = "0.3", optional = true }
-web-sys = { version = "0.3", features = ["Window", "Storage", "Location", "FormData", "Headers", "Request", "RequestInit", "RequestMode", "Response", "Performance", "PerformanceNavigationTiming", "HtmlCanvasElement", "CanvasRenderingContext2d", "CanvasGradient"], optional = true }
+web-sys = { version = "0.3", features = ["Window", "Storage", "Location", "FormData", "Headers", "Request", "RequestInit", "RequestMode", "Response", "Performance", "PerformanceNavigationTiming", "HtmlCanvasElement", "CanvasRenderingContext2d", "CanvasGradient", "HtmlElement", "Element", "Document", "CssStyleDeclaration"], optional = true }
 log = { version = "0.4" }
 reqwest = { version = "0.12", features = ["json", "multipart"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
@@ -51,8 +51,8 @@ ssr = [
 [profile.wasm-release]
 inherits = "release"
 opt-level = 'z'
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
 panic = "abort"
 
 [package.metadata.leptos]
