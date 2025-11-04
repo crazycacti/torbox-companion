@@ -355,9 +355,8 @@ pub fn SearchComponent() -> impl IntoView {
                                             }
                                         } else {
                                             match search_type_value {
-                                                SearchType::IMDB => {
-                                                    unreachable!("IMDB case already handled above")
-                                                }
+                                                // IMDB case is handled earlier in the outer match
+                                                SearchType::IMDB => {}
                                                 SearchType::Torrents => {
                                                     match client.search_torrents(
                                                         query_clone.clone(),
