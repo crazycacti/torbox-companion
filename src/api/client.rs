@@ -892,7 +892,7 @@ impl TorboxClient {
     }
 
     pub async fn search_metadata(&self, query: String) -> Result<SearchApiResponse<Vec<SearchMetadata>>, ApiError> {
-        let url = self.build_search_api_url(&format!("/meta/search/{}", query));
+        let url = self.build_search_api_url(&format!("/search/{}", query));
         
         let response = self.client.get(&url)
             .header("User-Agent", "TorboxCompanion/1.0")
@@ -995,15 +995,22 @@ impl TorboxClient {
         self.config.api_key = api_key;
     }
 
-    pub async fn get_speedtest_files(&self, user_ip: Option<String>, region: Option<String>) -> Result<ApiResponse<String>, ApiError> {
+    pub async fn get_speedtest_files(&self, user_ip: Option<String>, region: Option<String>, test_length: Option<String>) -> Result<ApiResponse<String>, ApiError> {
         let mut url = self.build_api_url("/v1/api/speedtest");
+        let mut params = Vec::new();
         
-        if let Some(ip) = &user_ip {
-            url.push_str(&format!("?user_ip={}", ip));
+        if let Some(ip) = user_ip {
+            params.push(format!("user_ip={}", ip));
         }
         if let Some(reg) = region {
-            let separator = if user_ip.is_some() { "&" } else { "?" };
-            url.push_str(&format!("{}region={}", separator, reg));
+            params.push(format!("region={}", reg));
+        }
+        if let Some(length) = test_length {
+            params.push(format!("test_length={}", length));
+        }
+        
+        if !params.is_empty() {
+            url.push_str(&format!("?{}", params.join("&")));
         }
         
         let response = self.request(reqwest::Method::GET, url, None::<&()>).await?;
@@ -1035,6 +1042,192 @@ impl TorboxClient {
         }
         
         let response = self.request(reqwest::Method::GET, url, None::<&()>).await?;
+        Self::handle_response(response).await
+    }
+
+    pub async fn control_queued_downloads(&self, operation: String, queued_id: Option<i32>, all: Option<bool>) -> Result<ApiResponse<String>, ApiError> {
+        let url = self.build_api_url("/v1/api/queued/controlqueued");
+        let body = serde_json::json!({
+            "operation": operation,
+            "queued_id": queued_id,
+            "all": all.unwrap_or(false)
+        });
+        
+        let response = self.request(reqwest::Method::POST, url, Some(&body)).await?;
+        Self::handle_response(response).await
+    }
+
+    // Check cached endpoints
+    pub async fn check_torrent_cached(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let mut url = self.build_api_url("/v1/api/torrents/checkcached");
+        let mut params = Vec::new();
+        
+        if !hashes.is_empty() {
+            for hash in &hashes {
+                params.push(format!("hash={}", hash));
+            }
+        }
+        if let Some(fmt) = format {
+            params.push(format!("format={}", fmt));
+        }
+        if let Some(list) = list_files {
+            params.push(format!("list_files={}", list));
+        }
+        
+        if !params.is_empty() {
+            url.push_str(&format!("?{}", params.join("&")));
+        }
+        
+        let response = self.request(reqwest::Method::GET, url, None::<&()>).await?;
+        Self::handle_response(response).await
+    }
+
+    pub async fn check_torrent_cached_post(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let url = self.build_api_url("/v1/api/torrents/checkcached");
+        let mut body = serde_json::json!({ "hashes": hashes });
+        
+        if let Some(fmt) = format {
+            body.as_object_mut().unwrap().insert("format".to_string(), serde_json::json!(fmt));
+        }
+        if let Some(list) = list_files {
+            body.as_object_mut().unwrap().insert("list_files".to_string(), serde_json::json!(list));
+        }
+        
+        let response = self.request(reqwest::Method::POST, url, Some(&body)).await?;
+        Self::handle_response(response).await
+    }
+
+    pub async fn check_webdl_cached(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let mut url = self.build_api_url("/v1/api/webdl/checkcached");
+        let mut params = Vec::new();
+        
+        if !hashes.is_empty() {
+            for hash in &hashes {
+                params.push(format!("hash={}", hash));
+            }
+        }
+        if let Some(fmt) = format {
+            params.push(format!("format={}", fmt));
+        }
+        if let Some(list) = list_files {
+            params.push(format!("list_files={}", list));
+        }
+        
+        if !params.is_empty() {
+            url.push_str(&format!("?{}", params.join("&")));
+        }
+        
+        let response = self.request(reqwest::Method::GET, url, None::<&()>).await?;
+        Self::handle_response(response).await
+    }
+
+    pub async fn check_webdl_cached_post(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let url = self.build_api_url("/v1/api/webdl/checkcached");
+        let mut body = serde_json::json!({ "hashes": hashes });
+        
+        if let Some(fmt) = format {
+            body.as_object_mut().unwrap().insert("format".to_string(), serde_json::json!(fmt));
+        }
+        if let Some(list) = list_files {
+            body.as_object_mut().unwrap().insert("list_files".to_string(), serde_json::json!(list));
+        }
+        
+        let response = self.request(reqwest::Method::POST, url, Some(&body)).await?;
+        Self::handle_response(response).await
+    }
+
+    pub async fn check_usenet_cached(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let mut url = self.build_api_url("/v1/api/usenet/checkcached");
+        let mut params = Vec::new();
+        
+        if !hashes.is_empty() {
+            for hash in &hashes {
+                params.push(format!("hash={}", hash));
+            }
+        }
+        if let Some(fmt) = format {
+            params.push(format!("format={}", fmt));
+        }
+        if let Some(list) = list_files {
+            params.push(format!("list_files={}", list));
+        }
+        
+        if !params.is_empty() {
+            url.push_str(&format!("?{}", params.join("&")));
+        }
+        
+        let response = self.request(reqwest::Method::GET, url, None::<&()>).await?;
+        Self::handle_response(response).await
+    }
+
+    pub async fn check_usenet_cached_post(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let url = self.build_api_url("/v1/api/usenet/checkcached");
+        let mut body = serde_json::json!({ "hashes": hashes });
+        
+        if let Some(fmt) = format {
+            body.as_object_mut().unwrap().insert("format".to_string(), serde_json::json!(fmt));
+        }
+        if let Some(list) = list_files {
+            body.as_object_mut().unwrap().insert("list_files".to_string(), serde_json::json!(list));
+        }
+        
+        let response = self.request(reqwest::Method::POST, url, Some(&body)).await?;
+        Self::handle_response(response).await
+    }
+
+    // Torrent info endpoints
+    pub async fn get_torrent_info(&self, hash: String, timeout: Option<i32>, use_cache_lookup: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let mut url = format!("{}?hash={}", self.build_api_url("/v1/api/torrents/torrentinfo"), hash);
+        
+        if let Some(to) = timeout {
+            url.push_str(&format!("&timeout={}", to));
+        }
+        if let Some(cache) = use_cache_lookup {
+            url.push_str(&format!("&use_cache_lookup={}", cache));
+        }
+        
+        let response = self.request(reqwest::Method::GET, url, None::<&()>).await?;
+        Self::handle_response(response).await
+    }
+
+    pub async fn get_torrent_info_post(&self, hash: Option<String>, magnet: Option<String>, file: Option<String>, timeout: Option<i32>, use_cache_lookup: Option<bool>) -> Result<ApiResponse<serde_json::Value>, ApiError> {
+        let url = self.build_api_url("/v1/api/torrents/torrentinfo");
+        let mut body = serde_json::json!({});
+        
+        if let Some(h) = hash {
+            body.as_object_mut().unwrap().insert("hash".to_string(), serde_json::json!(h));
+        }
+        if let Some(m) = magnet {
+            body.as_object_mut().unwrap().insert("magnet".to_string(), serde_json::json!(m));
+        }
+        if let Some(f) = file {
+            body.as_object_mut().unwrap().insert("file".to_string(), serde_json::json!(f));
+        }
+        if let Some(to) = timeout {
+            body.as_object_mut().unwrap().insert("timeout".to_string(), serde_json::json!(to));
+        }
+        if let Some(cache) = use_cache_lookup {
+            body.as_object_mut().unwrap().insert("use_cache_lookup".to_string(), serde_json::json!(cache));
+        }
+        
+        let response = self.request(reqwest::Method::POST, url, Some(&body)).await?;
+        Self::handle_response(response).await
+    }
+
+    // Export torrent data
+    pub async fn export_torrent_data(&self, torrent_id: i32, export_type: String) -> Result<ApiResponse<String>, ApiError> {
+        let url = format!("{}?torrent_id={}&type={}", self.build_api_url("/v1/api/torrents/exportdata"), torrent_id, export_type);
+        
+        let response = self.request(reqwest::Method::GET, url, None::<&()>).await?;
+        Self::handle_response(response).await
+    }
+
+    // Convert magnet to file
+    pub async fn magnet_to_file(&self, magnet: String) -> Result<ApiResponse<String>, ApiError> {
+        let url = self.build_api_url("/v1/api/torrents/magnettofile");
+        let body = serde_json::json!({ "magnet": magnet });
+        
+        let response = self.request(reqwest::Method::POST, url, Some(&body)).await?;
         Self::handle_response(response).await
     }
 }

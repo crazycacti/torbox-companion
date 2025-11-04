@@ -241,6 +241,7 @@ pub fn SearchComponent() -> impl IntoView {
     };
     
     let search_results = RwSignal::new(Vec::<SearchResultItem>::new());
+    let total_results_count = RwSignal::new(0);
     let is_searching = RwSignal::new(false);
     let search_error = RwSignal::new(Option::<String>::None);
     
@@ -287,6 +288,7 @@ pub fn SearchComponent() -> impl IntoView {
                             if !api_key.is_empty() {
                                 let client = TorboxClient::new(api_key);
                                 let mut all_results = Vec::<SearchResultItem>::new();
+                                let mut total_count = 0;
                                 let mut has_error = false;
                                 let mut error_msg = String::new();
                                 
@@ -300,6 +302,7 @@ pub fn SearchComponent() -> impl IntoView {
                                             match client.get_torrents_by_imdb(imdb_id.clone()).await {
                                                 Ok(response) => {
                                                     if let Some(data) = response.data {
+                                                        total_count += data.total_torrents;
                                                         for torrent in data.torrents {
                                                             all_results.push(SearchResultItem::Torrent(torrent));
                                                         }
@@ -315,6 +318,7 @@ pub fn SearchComponent() -> impl IntoView {
                                                 match client.get_usenet_by_imdb(imdb_id).await {
                                                     Ok(response) => {
                                                         if let Some(data) = response.data {
+                                                            total_count += data.total_nzbs;
                                                             for usenet in data.nzbs {
                                                                 all_results.push(SearchResultItem::Usenet(usenet));
                                                             }
@@ -332,25 +336,50 @@ pub fn SearchComponent() -> impl IntoView {
                                     }
                                     _ => {
                                         if use_custom_indexers_value && has_plan_2_value {
+                                            // Custom indexers mode: search both torrents and usenet with custom engines
+                                            match client.search_torrents(
+                                                query_clone.clone(),
+                                                Some(false),
+                                                Some(true),
+                                                Some(false),
+                                                Some(true), // Use custom search engines
+                                            ).await {
+                                                Ok(response) => {
+                                                    if let Some(data) = response.data {
+                                                        total_count += data.total_torrents;
+                                                        for torrent in data.torrents {
+                                                            all_results.push(SearchResultItem::Torrent(torrent));
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    has_error = true;
+                                                    error_msg = format!("Custom indexer torrent search failed: {}", e);
+                                                }
+                                            }
+                                            
                                             match client.search_usenet(
                                                 query_clone.clone(),
                                                 Some(false),
                                                 None,
                                                 None,
+                                                Some(true), // Check cache
                                                 Some(false),
-                                                Some(false),
-                                                Some(true),
+                                                Some(true), // Use custom search engines
                                             ).await {
                                                 Ok(response) => {
                                                     if let Some(data) = response.data {
+                                                        total_count += data.total_nzbs;
                                                         for usenet in data.nzbs {
                                                             all_results.push(SearchResultItem::Usenet(usenet));
                                                         }
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    has_error = true;
-                                                    error_msg = format!("Custom indexer search failed: {}", e);
+                                                    if !has_error {
+                                                        has_error = true;
+                                                        error_msg = format!("Custom indexer usenet search failed: {}", e);
+                                                    }
                                                 }
                                             }
                                         } else {
@@ -361,12 +390,13 @@ pub fn SearchComponent() -> impl IntoView {
                                                     match client.search_torrents(
                                                         query_clone.clone(),
                                                         Some(false),
-                                                        Some(true),
+                                                        Some(true), // Check cache
                                                         Some(false),
-                                                        None,
+                                                        None, // Don't use custom engines in regular mode
                                                     ).await {
                                                         Ok(response) => {
                                                             if let Some(data) = response.data {
+                                                                total_count += data.total_torrents;
                                                                 for torrent in data.torrents {
                                                                     all_results.push(SearchResultItem::Torrent(torrent));
                                                                 }
@@ -388,12 +418,13 @@ pub fn SearchComponent() -> impl IntoView {
                                                             Some(false),
                                                             None,
                                                             None,
-                                                            Some(true),
+                                                            Some(true), // Check cache
                                                             Some(false),
-                                                            None,
+                                                            None, // Don't use custom engines in regular mode
                                                         ).await {
                                                             Ok(response) => {
                                                                 if let Some(data) = response.data {
+                                                                    total_count += data.total_nzbs;
                                                                     for usenet in data.nzbs {
                                                                         all_results.push(SearchResultItem::Usenet(usenet));
                                                                     }
@@ -406,59 +437,65 @@ pub fn SearchComponent() -> impl IntoView {
                                                         }
                                                     }
                                                 }
-                                    SearchType::Both => {
-                                        match client.search_torrents(
-                                            query_clone.clone(),
-                                            Some(false),
-                                            Some(true),
-                                            Some(false),
-                                            None,
-                                        ).await {
-                                            Ok(response) => {
-                                                if let Some(data) = response.data {
-                                                    for torrent in data.torrents {
-                                                        all_results.push(SearchResultItem::Torrent(torrent));
+                                                SearchType::Both => {
+                                                    match client.search_torrents(
+                                                        query_clone.clone(),
+                                                        Some(false),
+                                                        Some(true), // Check cache
+                                                        Some(false),
+                                                        None, // Don't use custom engines in regular mode
+                                                    ).await {
+                                                        Ok(response) => {
+                                                            if let Some(data) = response.data {
+                                                                total_count += data.total_torrents;
+                                                                for torrent in data.torrents {
+                                                                    all_results.push(SearchResultItem::Torrent(torrent));
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            has_error = true;
+                                                            error_msg = format!("Torrent search failed: {}", e);
+                                                        }
                                                     }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                has_error = true;
-                                                error_msg = format!("Torrent search failed: {}", e);
-                                            }
-                                        }
-                                        
-                                        if has_plan_2_value {
-                                            match client.search_usenet(
-                                                query_clone.clone(),
-                                                Some(false),
-                                                None,
-                                                None,
-                                                Some(true),
-                                                Some(false),
-                                                None,
-                                            ).await {
-                                                Ok(response) => {
-                                                    if let Some(data) = response.data {
-                                                        for usenet in data.nzbs {
-                                                            all_results.push(SearchResultItem::Usenet(usenet));
+                                                    
+                                                    if has_plan_2_value {
+                                                        match client.search_usenet(
+                                                            query_clone.clone(),
+                                                            Some(false),
+                                                            None,
+                                                            None,
+                                                            Some(true), // Check cache
+                                                            Some(false),
+                                                            None, // Don't use custom engines in regular mode
+                                                        ).await {
+                                                            Ok(response) => {
+                                                                if let Some(data) = response.data {
+                                                                    total_count += data.total_nzbs;
+                                                                    for usenet in data.nzbs {
+                                                                        all_results.push(SearchResultItem::Usenet(usenet));
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                if !has_error {
+                                                                    has_error = true;
+                                                                    error_msg = format!("Usenet search failed: {}", e);
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
-                                                Err(e) => {
-                                                    if !has_error {
-                                                        has_error = true;
-                                                        error_msg = format!("Usenet search failed: {}", e);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
                                             }
                                         }
                                     }
                                 }
                                 
+                                // Get displayed count before moving all_results
+                                let displayed_count = all_results.len() as i32;
                                 results_signal.set(all_results);
+                                // Update total count - use displayed results count if API doesn't provide accurate total
+                                total_results_count.set(if total_count > 0 { total_count } else { displayed_count });
                                 if has_error {
                                     error_signal.set(Some(error_msg));
                                 }
@@ -631,10 +668,11 @@ pub fn SearchComponent() -> impl IntoView {
                                     class="absolute top-1/2 -translate-y-1/2 right-3 p-1.5 rounded transition-all"
                                     style="color: var(--text-secondary);"
                                     on:click=move |ev| {
-                                        ev.stop_propagation();
-                                        search_query.set(String::new());
-                                        search_results.set(Vec::new());
-                                        search_error.set(None);
+                                    ev.stop_propagation();
+                                    search_query.set(String::new());
+                                    search_results.set(Vec::new());
+                                    total_results_count.set(0);
+                                    search_error.set(None);
                                     }
                                     title="Clear search"
                                 >
@@ -789,6 +827,21 @@ pub fn SearchComponent() -> impl IntoView {
             
             <Show when=move || !search_results.get().is_empty()>
                 <div class="mt-4 rounded-xl border overflow-hidden" style="background-color: var(--bg-card); border-color: var(--border-secondary);">
+                    <div class="px-4 md:px-6 py-3 border-b" style="border-color: var(--border-secondary); background-color: var(--bg-tertiary);">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm font-medium" style="color: var(--text-primary);">
+                                {move || {
+                                    let displayed = search_results.get().len();
+                                    let total = total_results_count.get();
+                                    if total > displayed as i32 {
+                                        format!("Showing {} of {} results", displayed, total)
+                                    } else {
+                                        format!("{} result{}", displayed, if displayed == 1 { "" } else { "s" })
+                                    }
+                                }}
+                            </span>
+                        </div>
+                    </div>
                     <div class="overflow-x-auto" style="max-height: 500px; overflow-y: auto;">
                         <table class="w-full border-collapse min-w-[600px]">
                             <thead style="position: sticky; top: 0; z-index: 10;">

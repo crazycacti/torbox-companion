@@ -116,8 +116,8 @@ impl RequestHandler {
     }
 
     /// Get speedtest files with user IP for CDN optimization
-    pub async fn get_speedtest_files(&self, user_ip: Option<String>, region: Option<String>) -> Result<String, ApiError> {
-        let response = self.client.get_speedtest_files(user_ip, region).await?;
+    pub async fn get_speedtest_files(&self, user_ip: Option<String>, region: Option<String>, test_length: Option<String>) -> Result<String, ApiError> {
+        let response = self.client.get_speedtest_files(user_ip, region, test_length).await?;
         response.data.ok_or(ApiError::ServerError)
     }
 
@@ -319,6 +319,78 @@ impl RequestHandler {
             Err(ApiError::AuthenticationError) => Ok(false),
             Err(e) => Err(e),
         }
+    }
+
+    /// Get queued downloads with filters
+    pub async fn get_queued_downloads(&self, download_type: Option<String>, id: Option<i32>, bypass_cache: Option<bool>, offset: Option<i32>, limit: Option<i32>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.get_queued_downloads(download_type, id, bypass_cache, offset, limit).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Control queued downloads (start, delete)
+    pub async fn control_queued_downloads(&self, operation: String, queued_id: Option<i32>, all: Option<bool>) -> Result<String, ApiError> {
+        let response = self.client.control_queued_downloads(operation, queued_id, all).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Check if torrents are cached (GET)
+    pub async fn check_torrent_cached(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.check_torrent_cached(hashes, format, list_files).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Check if torrents are cached (POST)
+    pub async fn check_torrent_cached_post(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.check_torrent_cached_post(hashes, format, list_files).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Check if web downloads are cached (GET)
+    pub async fn check_webdl_cached(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.check_webdl_cached(hashes, format, list_files).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Check if web downloads are cached (POST)
+    pub async fn check_webdl_cached_post(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.check_webdl_cached_post(hashes, format, list_files).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Check if usenet downloads are cached (GET)
+    pub async fn check_usenet_cached(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.check_usenet_cached(hashes, format, list_files).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Check if usenet downloads are cached (POST)
+    pub async fn check_usenet_cached_post(&self, hashes: Vec<String>, format: Option<String>, list_files: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.check_usenet_cached_post(hashes, format, list_files).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Get torrent information (GET)
+    pub async fn get_torrent_info(&self, hash: String, timeout: Option<i32>, use_cache_lookup: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.get_torrent_info(hash, timeout, use_cache_lookup).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Get torrent information (POST)
+    pub async fn get_torrent_info_post(&self, hash: Option<String>, magnet: Option<String>, file: Option<String>, timeout: Option<i32>, use_cache_lookup: Option<bool>) -> Result<serde_json::Value, ApiError> {
+        let response = self.client.get_torrent_info_post(hash, magnet, file, timeout, use_cache_lookup).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Export torrent data (magnet or torrent file)
+    pub async fn export_torrent_data(&self, torrent_id: i32, export_type: String) -> Result<String, ApiError> {
+        let response = self.client.export_torrent_data(torrent_id, export_type).await?;
+        response.data.ok_or(ApiError::ServerError)
+    }
+
+    /// Convert magnet link to torrent file
+    pub async fn magnet_to_file(&self, magnet: String) -> Result<String, ApiError> {
+        let response = self.client.magnet_to_file(magnet).await?;
+        response.data.ok_or(ApiError::ServerError)
     }
 }
 
