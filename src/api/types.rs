@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize, Deserializer};
-use std::collections::HashMap;
 
 // Helper to deserialize categories that might be an array or single value
 fn deserialize_categories<'de, D>(deserializer: D) -> Result<Option<Vec<serde_json::Value>>, D::Error>
@@ -43,6 +42,26 @@ where
                 .ok_or_else(|| D::Error::custom("Invalid integer"))
         }
         _ => Ok(None), // If it's not a number, return None instead of erroring
+    }
+}
+
+// Helper to deserialize size that might come as a string or number (for custom indexers)
+fn deserialize_size<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Number(n) => {
+            n.as_u64()
+                .ok_or_else(|| D::Error::custom("Invalid u64 number"))
+        }
+        serde_json::Value::String(s) => {
+            s.parse::<u64>()
+                .map_err(|e| D::Error::custom(format!("Failed to parse size string '{}': {}", s, e)))
+        }
+        _ => Err(D::Error::custom(format!("Expected number or string for size, got: {:?}", value))),
     }
 }
 
@@ -421,6 +440,7 @@ pub struct SearchTorrent {
     pub last_known_seeders: Option<i32>,
     #[serde(rename = "last_known_peers", deserialize_with = "deserialize_optional_int")]
     pub last_known_peers: Option<i32>,
+    #[serde(deserialize_with = "deserialize_size")]
     pub size: u64,
     pub tracker: Option<String>,
     #[serde(deserialize_with = "deserialize_categories")]
@@ -447,6 +467,7 @@ pub struct SearchUsenet {
     pub last_known_seeders: Option<i32>,
     #[serde(rename = "last_known_peers", deserialize_with = "deserialize_optional_int")]
     pub last_known_peers: Option<i32>,
+    #[serde(deserialize_with = "deserialize_size")]
     pub size: u64,
     pub tracker: Option<String>,
     #[serde(deserialize_with = "deserialize_categories")]

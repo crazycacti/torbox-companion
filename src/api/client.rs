@@ -801,6 +801,30 @@ impl TorboxClient {
         Self::handle_search_response(response).await
     }
 
+    pub async fn get_torrents_by_imdb(&self, imdb_id: String) -> Result<SearchApiResponse<SearchTorrentsResponse>, ApiError> {
+        let url = self.build_search_api_url(&format!("/torrents/imdb:{}", imdb_id));
+        
+        let response = self.client.get(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("User-Agent", "TorboxCompanion/1.0")
+            .send()
+            .await
+            .map_err(|_| ApiError::NetworkError)?;
+        Self::handle_search_response(response).await
+    }
+
+    pub async fn get_usenet_by_imdb(&self, imdb_id: String) -> Result<SearchApiResponse<SearchUsenetResponse>, ApiError> {
+        let url = self.build_search_api_url(&format!("/usenet/imdb:{}", imdb_id));
+        
+        let response = self.client.get(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("User-Agent", "TorboxCompanion/1.0")
+            .send()
+            .await
+            .map_err(|_| ApiError::NetworkError)?;
+        Self::handle_search_response(response).await
+    }
+
     pub async fn search_torrents(&self, query: String, metadata: Option<bool>, check_cache: Option<bool>, check_owned: Option<bool>, search_user_engines: Option<bool>) -> Result<SearchApiResponse<SearchTorrentsResponse>, ApiError> {
         let mut url = self.build_search_api_url(&format!("/torrents/search/{}", query));
         let mut params = Vec::new();

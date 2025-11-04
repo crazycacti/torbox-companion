@@ -15,6 +15,7 @@ pub enum SearchType {
     Torrents,
     Usenet,
     Both,
+    IMDB,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -109,6 +110,7 @@ pub fn SearchComponent() -> impl IntoView {
                             "torrents" => SearchType::Torrents,
                             "usenet" => SearchType::Usenet,
                             "both" => SearchType::Both,
+                            "imdb" => SearchType::IMDB,
                             _ => SearchType::Torrents,
                         };
                         
@@ -163,6 +165,7 @@ pub fn SearchComponent() -> impl IntoView {
                         SearchType::Torrents => "torrents",
                         SearchType::Usenet => "usenet",
                         SearchType::Both => "both",
+                        SearchType::IMDB => "imdb",
                     };
                     let _ = storage.set_item("search_type_preference", type_str);
                 }
@@ -287,64 +290,56 @@ pub fn SearchComponent() -> impl IntoView {
                                 let mut has_error = false;
                                 let mut error_msg = String::new();
                                 
-                                if use_custom_indexers_value && has_plan_2_value {
-                                    match client.search_usenet(
-                                        query_clone.clone(),
-                                        Some(false),
-                                        None,
-                                        None,
-                                        Some(false),
-                                        Some(false),
-                                        Some(true),
-                                    ).await {
-                                        Ok(response) => {
-                                            if let Some(data) = response.data {
-                                                for usenet in data.nzbs {
-                                                    all_results.push(SearchResultItem::Usenet(usenet));
+                                match search_type_value {
+                                    SearchType::IMDB => {
+                                        let imdb_id = query_clone.trim().to_string();
+                                        if !imdb_id.starts_with("tt") {
+                                            has_error = true;
+                                            error_msg = "IMDB ID must start with 'tt' (e.g., tt5151761)".to_string();
+                                        } else {
+                                            match client.get_torrents_by_imdb(imdb_id.clone()).await {
+                                                Ok(response) => {
+                                                    if let Some(data) = response.data {
+                                                        for torrent in data.torrents {
+                                                            all_results.push(SearchResultItem::Torrent(torrent));
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    has_error = true;
+                                                    error_msg = format!("IMDB torrent search failed: {}", e);
                                                 }
                                             }
-                                        }
-                                        Err(e) => {
-                                            has_error = true;
-                                            error_msg = format!("Custom indexer search failed: {}", e);
-                                        }
-                                    }
-                                } else {
-                                    match search_type_value {
-                                        SearchType::Torrents => {
-                                            match client.search_torrents(
-                                                query_clone.clone(),
-                                                Some(false),
-                                                Some(true),
-                                                Some(false),
-                                                None,
-                                            ).await {
-                                            Ok(response) => {
-                                                if let Some(data) = response.data {
-                                                    for torrent in data.torrents {
-                                                        all_results.push(SearchResultItem::Torrent(torrent));
+                                            
+                                            if has_plan_2_value {
+                                                match client.get_usenet_by_imdb(imdb_id).await {
+                                                    Ok(response) => {
+                                                        if let Some(data) = response.data {
+                                                            for usenet in data.nzbs {
+                                                                all_results.push(SearchResultItem::Usenet(usenet));
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        if !has_error {
+                                                            has_error = true;
+                                                            error_msg = format!("IMDB usenet search failed: {}", e);
+                                                        }
                                                     }
                                                 }
                                             }
-                                            Err(e) => {
-                                                has_error = true;
-                                                error_msg = format!("Torrent search failed: {}", e);
-                                            }
                                         }
                                     }
-                                    SearchType::Usenet => {
-                                        if !has_plan_2_value {
-                                            has_error = true;
-                                            error_msg = "Usenet search requires Plan 2".to_string();
-                                        } else {
+                                    _ => {
+                                        if use_custom_indexers_value && has_plan_2_value {
                                             match client.search_usenet(
                                                 query_clone.clone(),
                                                 Some(false),
                                                 None,
                                                 None,
-                                                Some(true),
                                                 Some(false),
-                                                None,
+                                                Some(false),
+                                                Some(true),
                                             ).await {
                                                 Ok(response) => {
                                                     if let Some(data) = response.data {
@@ -355,11 +350,63 @@ pub fn SearchComponent() -> impl IntoView {
                                                 }
                                                 Err(e) => {
                                                     has_error = true;
-                                                    error_msg = format!("Usenet search failed: {}", e);
+                                                    error_msg = format!("Custom indexer search failed: {}", e);
                                                 }
                                             }
-                                        }
-                                    }
+                                        } else {
+                                            match search_type_value {
+                                                SearchType::IMDB => {
+                                                    unreachable!("IMDB case already handled above")
+                                                }
+                                                SearchType::Torrents => {
+                                                    match client.search_torrents(
+                                                        query_clone.clone(),
+                                                        Some(false),
+                                                        Some(true),
+                                                        Some(false),
+                                                        None,
+                                                    ).await {
+                                                        Ok(response) => {
+                                                            if let Some(data) = response.data {
+                                                                for torrent in data.torrents {
+                                                                    all_results.push(SearchResultItem::Torrent(torrent));
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            has_error = true;
+                                                            error_msg = format!("Torrent search failed: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                                SearchType::Usenet => {
+                                                    if !has_plan_2_value {
+                                                        has_error = true;
+                                                        error_msg = "Usenet search requires Plan 2".to_string();
+                                                    } else {
+                                                        match client.search_usenet(
+                                                            query_clone.clone(),
+                                                            Some(false),
+                                                            None,
+                                                            None,
+                                                            Some(true),
+                                                            Some(false),
+                                                            None,
+                                                        ).await {
+                                                            Ok(response) => {
+                                                                if let Some(data) = response.data {
+                                                                    for usenet in data.nzbs {
+                                                                        all_results.push(SearchResultItem::Usenet(usenet));
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                has_error = true;
+                                                                error_msg = format!("Usenet search failed: {}", e);
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                     SearchType::Both => {
                                         match client.search_torrents(
                                             query_clone.clone(),
@@ -407,8 +454,10 @@ pub fn SearchComponent() -> impl IntoView {
                                             }
                                         }
                                     }
+                                            }
+                                        }
+                                    }
                                 }
-                            }
                                 
                                 results_signal.set(all_results);
                                 if has_error {
@@ -544,7 +593,18 @@ pub fn SearchComponent() -> impl IntoView {
                         <div class="flex-1 relative">
                             <input
                                 type="text"
-                                placeholder="Search torrents, usenet..."
+                                placeholder=move || {
+                                    if use_custom_indexers.get() && has_plan_2() {
+                                        "Search custom indexers"
+                                    } else {
+                                        match search_type.get() {
+                                            SearchType::Torrents => "Search torrents",
+                                            SearchType::Usenet => "Search usenet",
+                                            SearchType::Both => "Search torrents and usenet",
+                                            SearchType::IMDB => "Enter IMDB ID (e.g., tt5151761)",
+                                        }
+                                    }
+                                }
                                 class="w-full px-4 py-3 pr-10 rounded-lg border transition-all text-sm sm:text-base"
                                 style="background-color: var(--bg-secondary); border-color: var(--border-primary); color: var(--text-primary);"
                                 prop:value=move || search_query.get()
@@ -603,14 +663,15 @@ pub fn SearchComponent() -> impl IntoView {
                             <span class="text-sm font-medium shrink-0" style="color: var(--text-secondary);">"Type:"</span>
                             <div class="flex gap-0.5 rounded-lg" style="background-color: var(--bg-secondary); border: 1px solid var(--border-secondary);">
                             <button
-                                class="px-4 py-2 text-sm font-medium transition-all rounded-l-lg"
+                                class="px-4 py-2 text-sm font-medium transition-all"
                                 style=move || {
                                     let is_active = search_type.get() == SearchType::Torrents;
-                                    if is_active {
-                                        "background-color: var(--accent-primary); color: white;"
+                                    let classes = if is_active {
+                                        "background-color: var(--accent-primary); color: white; border-radius: 0.5rem 0 0 0.5rem;"
                                     } else {
-                                        "background-color: transparent; color: var(--text-secondary);"
-                                    }
+                                        "background-color: transparent; color: var(--text-secondary); border-radius: 0.5rem 0 0 0.5rem;"
+                                    };
+                                    classes
                                 }
                                 on:click=move |_| save_search_type(SearchType::Torrents)
                             >
@@ -639,7 +700,7 @@ pub fn SearchComponent() -> impl IntoView {
                                 "Usenet"
                             </button>
                             <button
-                                class="px-4 py-2 text-sm font-medium transition-all rounded-r-lg"
+                                class="px-4 py-2 text-sm font-medium transition-all"
                                 style=move || {
                                     let has_plan = has_plan_2();
                                     let is_active = search_type.get() == SearchType::Both;
@@ -659,6 +720,21 @@ pub fn SearchComponent() -> impl IntoView {
                                 }
                             >
                                 "Both"
+                            </button>
+                            <button
+                                class="px-4 py-2 text-sm font-medium transition-all"
+                                style=move || {
+                                    let is_active = search_type.get() == SearchType::IMDB;
+                                    let classes = if is_active {
+                                        "background-color: var(--accent-primary); color: white; border-radius: 0 0.5rem 0.5rem 0;"
+                                    } else {
+                                        "background-color: transparent; color: var(--text-secondary); border-radius: 0 0.5rem 0.5rem 0;"
+                                    };
+                                    classes
+                                }
+                                on:click=move |_| save_search_type(SearchType::IMDB)
+                            >
+                                "IMDB"
                             </button>
                             </div>
                         </div>
