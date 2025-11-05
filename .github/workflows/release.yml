@@ -10,31 +10,20 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-      id-token: write
-
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
+      created: ${{ steps.meta.outputs.created }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -47,29 +36,151 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
+  build:
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-latest-arm64' || 'ubuntu-latest' }}
+    needs: prepare
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set cache tag
+        run: |
+          CACHE_TAG=$(echo "${{ matrix.platform }}" | tr '/' '-')
+          echo "CACHE_TAG=${CACHE_TAG}" >> $GITHUB_ENV
+
       - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          labels: ${{ needs.prepare.outputs.labels }}
+          cache-from: |
+            type=gha,scope=${{ matrix.platform }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ env.CACHE_TAG }}
+          cache-to: |
+            type=gha,mode=max,scope=${{ matrix.platform }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ env.CACHE_TAG }},mode=max
           build-args: |
-            BUILD_DATE=${{ steps.meta.outputs.created }}
+            BUILD_DATE=${{ needs.prepare.outputs.created }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ needs.prepare.outputs.version }}
+          outputs: type=image,oci-mediatypes=true,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true
+
+      - name: Export image digest
+        run: |
+          PLATFORM_SLUG=$(echo "${{ matrix.platform }}" | tr '/' '-')
+          DIGEST_FILE="${PLATFORM_SLUG}.digest"
+          echo "${{ steps.build.outputs.digest }}" > ${DIGEST_FILE}
+          echo "DIGEST_FILE=${DIGEST_FILE}" >> $GITHUB_ENV
+          echo "IMAGE_DIGEST=${{ steps.build.outputs.digest }}" >> $GITHUB_ENV
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ env.CACHE_TAG }}
+          path: ${{ env.DIGEST_FILE }}
+          retention-days: 1
+
+  manifest:
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    permissions:
+      contents: read
+      packages: write
+    if: needs.build.result == 'success'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download digest artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: false
+
+      - name: Create manifest list
+        run: |
+          AMD64_DIGEST=$(find . -name "linux-amd64.digest" -type f | head -1 | xargs cat)
+          ARM64_DIGEST=$(find . -name "linux-arm64.digest" -type f | head -1 | xargs cat)
+          
+          if [ -z "$AMD64_DIGEST" ] || [ -z "$ARM64_DIGEST" ]; then
+            echo "Error: Could not find digest files"
+            find . -name "*.digest" -type f
+            exit 1
+          fi
+          
+          echo "AMD64 digest: $AMD64_DIGEST"
+          echo "ARM64 digest: $ARM64_DIGEST"
+          
+          TAGS="${{ needs.prepare.outputs.tags }}"
+          echo "$TAGS" | while IFS= read -r TAG; do
+            if [ -n "$TAG" ]; then
+              echo "Creating manifest for tag: $TAG"
+              docker buildx imagetools create \
+                --tag "$TAG" \
+                ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${AMD64_DIGEST} \
+                ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${ARM64_DIGEST}
+            fi
+          done
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@$(find . -name "linux-amd64.digest" -type f | head -1 | xargs cat)
           subject-type: container
           push-to-registry: true
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [prepare, manifest]
+    permissions:
+      contents: write
+      packages: read
+    if: needs.manifest.result == 'success'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download digest artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: false
 
       - name: Create GitHub Release
         uses: actions/create-release@v1

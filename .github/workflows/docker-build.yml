@@ -33,6 +33,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get version from Cargo.toml
+        id: cargo_version
+        run: |
+          VERSION=$(grep -m1 '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/' | tr -d ' ')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Detected version: ${VERSION}"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -42,12 +49,13 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=semver,pattern={{version}},suffix={{branch}}
+            type=raw,value=${{ steps.cargo_version.outputs.version }}
+            type=raw,value=${{ steps.cargo_version.outputs.version }}-{{sha}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-latest-arm64' || 'ubuntu-latest' }}
     needs: prepare
     permissions:
       contents: read
@@ -64,10 +72,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        if: matrix.platform == 'linux/arm64'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -96,6 +100,7 @@ jobs:
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
+          tags: ${{ needs.prepare.outputs.tags }}
           labels: ${{ needs.prepare.outputs.labels }}
           cache-from: |
             type=gha,scope=${{ matrix.platform }}

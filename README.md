@@ -85,7 +85,6 @@ cargo leptos build --release
 - **Smart Downloads**: Cherry-pick specific files across multiple downloads
 - **Real-time Monitoring**: Live status updates and progress tracking
 - **Customizable Interface**: Tailor the workflow to match your needs
-- **Performance Optimized**: Built with Rust for maximum speed and efficiency
 
 ## Development
 
