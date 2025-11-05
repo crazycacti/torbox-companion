@@ -37,7 +37,7 @@ jobs:
             type=raw,value=latest
 
   build:
-    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-latest-arm64' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs: prepare
     permissions:
       contents: read
