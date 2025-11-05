@@ -112,15 +112,29 @@ jobs:
             BUILD_DATE=${{ needs.prepare.outputs.created }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ needs.prepare.outputs.version }}
-          outputs: type=image,oci-mediatypes=true,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true
 
       - name: Export image digest
         run: |
           PLATFORM_SLUG=$(echo "${{ matrix.platform }}" | tr '/' '-')
           DIGEST_FILE="${PLATFORM_SLUG}.digest"
-          echo "${{ steps.build.outputs.digest }}" > ${DIGEST_FILE}
+          # Get the first tag (tags are newline-separated)
+          FIRST_TAG=$(echo "${{ needs.prepare.outputs.tags }}" | head -n1 | tr -d ' ')
+          echo "Inspecting tag: $FIRST_TAG"
+          # Extract digest from the pushed image using imagetools
+          # For single-platform images, we get the manifest digest directly
+          DIGEST=$(docker buildx imagetools inspect "$FIRST_TAG" 2>&1 | grep -oE 'sha256:[a-f0-9]{64}' | head -n1 || echo "")
+          if [ -z "$DIGEST" ]; then
+            # Alternative: use manifest inspect JSON output
+            DIGEST=$(docker manifest inspect "$FIRST_TAG" 2>/dev/null | jq -r 'if .config then .config.digest else .digest end' || echo "")
+          fi
+          if [ -z "$DIGEST" ]; then
+            echo "Error: Could not extract digest from $FIRST_TAG"
+            exit 1
+          fi
+          echo "$DIGEST" > ${DIGEST_FILE}
           echo "DIGEST_FILE=${DIGEST_FILE}" >> $GITHUB_ENV
-          echo "IMAGE_DIGEST=${{ steps.build.outputs.digest }}" >> $GITHUB_ENV
+          echo "IMAGE_DIGEST=$DIGEST" >> $GITHUB_ENV
+          echo "Extracted digest: $DIGEST"
 
       - name: Upload digest artifact
         uses: actions/upload-artifact@v4
