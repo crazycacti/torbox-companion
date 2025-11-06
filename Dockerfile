@@ -26,9 +26,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install wasm-pack --version 0.12.1 && \
     rustup target add wasm32-unknown-unknown
 
-# Configure environment variables
-# Note: Not using sccache as it conflicts with cargo-leptos metadata operations
-# Target directory caching provides similar benefits for Docker builds
 ENV CARGO_INCREMENTAL=1
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
@@ -60,15 +57,19 @@ ENV LEPTOS_OUTPUT_NAME=torbox-companion
 ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
 ENV LEPTOS_ENV=PROD
 ENV RUST_BACKTRACE=1
-ENV LEPTOS_WASM_OPT_VERSION=version_124
 
-# Build with parallel compilation and full caching
-# Target directory cache provides compilation caching between builds
-# Note: We need to copy artifacts out of cache mount to filesystem for final stage
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/app/target \
     sh -c 'set -e && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        echo "ARM64 detected, disabling wasm-opt optimization" && \
+        export LEPTOS_WASM_OPT=false; \
+    else \
+        echo "Using wasm-opt optimization" && \
+        export LEPTOS_WASM_OPT_VERSION=version_124; \
+    fi && \
     echo "Starting cargo leptos build..." && \
     CARGO_BUILD_JOBS=$(nproc) \
     cargo leptos build --release && \
@@ -84,8 +85,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     ln -sf torbox-companion.wasm torbox-companion_bg.wasm && \
     echo "Build verification complete"'
 
-# Copy build artifacts from cache to filesystem so they persist to final stage
-# The cache mount only exists during the RUN command, so we need to copy artifacts out
 RUN --mount=type=cache,target=/app/target \
     sh -c 'mkdir -p /app/build-output && \
     cp -r target/release/torbox-companion /app/build-output/ && \
