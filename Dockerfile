@@ -60,25 +60,35 @@ ENV LEPTOS_ENV=PROD
 ENV RUST_BACKTRACE=1
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "ARM64 detected, disabling wasm-opt optimization" && \
-        if ! grep -q "wasm-opt-features" Cargo.toml; then \
-            sed -i '/^\[package\.metadata\.leptos\]/a wasm-opt-features = []' Cargo.toml && \
-            echo "Added wasm-opt-features = [] to Cargo.toml"; \
-        fi; \
+        echo "ARM64 detected, disabling wasm-opt" && \
+        if ! grep -qE "^wasm-opt-features\s*=\s*\[\]" Cargo.toml; then \
+            awk '/^\[package\.metadata\.leptos\]/ { \
+                print; \
+                print "wasm-opt-features = []"; \
+                next \
+            } \
+            { print }' Cargo.toml > Cargo.toml.tmp && \
+            mv Cargo.toml.tmp Cargo.toml; \
+        fi && \
+        if ! grep -qE "^wasm-opt\s*=\s*false" Cargo.toml; then \
+            awk '/^\[package\.metadata\.leptos\]/ { \
+                print; \
+                print "wasm-opt = false"; \
+                next \
+            } \
+            { print }' Cargo.toml > Cargo.toml.tmp && \
+            mv Cargo.toml.tmp Cargo.toml; \
+        fi && \
+        echo "Verifying wasm-opt configuration:" && \
+        grep -E "^wasm-opt" Cargo.toml || echo "No wasm-opt settings found"; \
     else \
-        echo "Using wasm-opt optimization for $TARGETARCH"; \
+        echo "TARGETARCH is $TARGETARCH, using wasm-opt optimization"; \
     fi
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/app/target \
-    sh -c 'set -e && \
-    if [ "$TARGETARCH" != "arm64" ]; then \
-        export LEPTOS_WASM_OPT_VERSION=version_124; \
-    fi && \
-    echo "Starting cargo leptos build..." && \
-    CARGO_BUILD_JOBS=$(nproc) \
-    cargo leptos build --release && \
+    sh -c 'CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release && \
     echo "Build completed, checking for WASM file..." && \
     if [ ! -f target/site/pkg/torbox-companion.wasm ]; then \
         echo "ERROR: cargo leptos build failed to create torbox-companion.wasm"; \
