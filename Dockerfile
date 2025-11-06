@@ -60,6 +60,7 @@ ENV LEPTOS_OUTPUT_NAME=torbox-companion
 ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
 ENV LEPTOS_ENV=PROD
 ENV RUST_BACKTRACE=1
+ENV LEPTOS_WASM_OPT_VERSION=version_124
 
 # Build with parallel compilation and full caching
 # Target directory cache provides compilation caching between builds
