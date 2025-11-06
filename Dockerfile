@@ -4,6 +4,7 @@ FROM rust:1.90-slim AS base
 ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
+ARG TARGETARCH
 
 # Install system dependencies in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -58,16 +59,21 @@ ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
 ENV LEPTOS_ENV=PROD
 ENV RUST_BACKTRACE=1
 
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "ARM64 detected, disabling wasm-opt optimization" && \
+        if ! grep -q "wasm-opt-features" Cargo.toml; then \
+            sed -i '/^\[package\.metadata\.leptos\]/a wasm-opt-features = []' Cargo.toml && \
+            echo "Added wasm-opt-features = [] to Cargo.toml"; \
+        fi; \
+    else \
+        echo "Using wasm-opt optimization for $TARGETARCH"; \
+    fi
+
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/app/target \
     sh -c 'set -e && \
-    ARCH=$(uname -m) && \
-    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
-        echo "ARM64 detected, disabling wasm-opt optimization" && \
-        export LEPTOS_WASM_OPT=false; \
-    else \
-        echo "Using wasm-opt optimization" && \
+    if [ "$TARGETARCH" != "arm64" ]; then \
         export LEPTOS_WASM_OPT_VERSION=version_124; \
     fi && \
     echo "Starting cargo leptos build..." && \
