@@ -65,7 +65,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
         echo "ARM64 detected, disabling wasm-opt optimization" && \
-        export LEPTOS_WASM_OPT=false; \
+        if ! grep -q "wasm-opt-features" Cargo.toml; then \
+            sed -i "/\\[package.metadata.leptos\\]/a wasm-opt-features = []" Cargo.toml && \
+            echo "Added wasm-opt-features = [] to Cargo.toml"; \
+        fi; \
+        export LEPTOS_WASM_OPT_VERSION=version_124; \
     else \
         echo "Using wasm-opt optimization" && \
         export LEPTOS_WASM_OPT_VERSION=version_124; \
