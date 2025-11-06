@@ -88,7 +88,30 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/app/target \
-    sh -c 'CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release && \
+    sh -c 'if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "Setting up wasm-opt no-op wrapper for ARM64..." && \
+        mkdir -p ~/.cargo/bin && \
+        printf "#!/bin/sh\necho \"wasm-opt skipped on ARM64 (no-op)\"\nif [ -n \"\\\$2\" ] && [ -f \"\\\$1\" ]; then cp \"\\\$1\" \"\\\$2\" 2>/dev/null || true; fi\nexit 0\n" > ~/.cargo/bin/wasm-opt && \
+        chmod +x ~/.cargo/bin/wasm-opt && \
+        export PATH="$HOME/.cargo/bin:$PATH" && \
+        echo "wasm-opt wrapper created, will intercept any binary-install downloads"; \
+    fi && \
+    CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release 2>&1 | tee /tmp/build.log && \
+    if [ "$TARGETARCH" = "arm64" ] && [ -f /tmp/build.log ] && grep -q "wasm-opt.*installed\|wasm-opt.*downloaded" /tmp/build.log; then \
+        echo "wasm-opt was downloaded by binary-install, patching it..." && \
+        find ~/.cargo ~/.cache /root/.cargo /root/.cache -name "wasm-opt*" -type f -executable 2>/dev/null | while read -r wasmopt; do \
+            if [ -f "$wasmopt" ] && file "$wasmopt" 2>/dev/null | grep -qE "ELF|executable"; then \
+                echo "Patching $wasmopt" && \
+                mv "$wasmopt" "${wasmopt}.orig" 2>/dev/null && \
+                printf "#!/bin/sh\necho \"wasm-opt skipped on ARM64\"\nif [ -n \"\\\$2\" ] && [ -f \"\\\$1\" ]; then cp \"\\\$1\" \"\\\$2\" 2>/dev/null || true; fi\nexit 0\n" > "$wasmopt" && \
+                chmod +x "$wasmopt"; \
+            fi \
+        done && \
+        if grep -q "wasm-opt.*failed\|wasm-opt.*error" /tmp/build.log; then \
+            echo "wasm-opt failed, retrying build with patched binary..." && \
+            cargo leptos build --release; \
+        fi; \
+    fi && \
     echo "Build completed, checking for WASM file..." && \
     if [ ! -f target/site/pkg/torbox-companion.wasm ]; then \
         echo "ERROR: cargo leptos build failed to create torbox-companion.wasm"; \
