@@ -411,7 +411,7 @@ pub fn SearchComponent() -> impl IntoView {
                                                 SearchType::Usenet => {
                                                     if !has_plan_2_value {
                                                         has_error = true;
-                                                        error_msg = "Usenet search requires Plan 2".to_string();
+                                                        error_msg = "Usenet search requires Pro plan".to_string();
                                                     } else {
                                                         match client.search_usenet(
                                                             query_clone.clone(),

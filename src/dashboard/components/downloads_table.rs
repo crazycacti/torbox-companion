@@ -35,6 +35,11 @@ pub struct DownloadItem {
     pub eta: Option<i32>,
     pub total_downloaded: Option<i64>,
     pub private: bool,
+    pub ratio: Option<f32>, 
+    pub magnet: Option<String>, 
+    pub source_url: Option<String>, 
+    pub seeds: Option<i32>, 
+    pub peers: Option<i32>, 
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -225,10 +230,8 @@ impl std::fmt::Display for DownloadType {
     }
 }
 
-// Convert API types to DownloadItem
 impl From<Torrent> for DownloadItem {
     fn from(torrent: Torrent) -> Self {
-        // Cache lowercase name once (much faster than calling to_lowercase() 10+ times)
         let name_lower = torrent.name.to_lowercase();
         let is_season = name_lower.contains("season") || 
                        name_lower.contains("s0") ||
@@ -247,7 +250,7 @@ impl From<Torrent> for DownloadItem {
                 Some(SeasonInfo {
                     season_number: extract_season_number(&torrent.name),
                     episode_count: files.len() as i32,
-                    episodes: Vec::new(), // Load lazily when row expands or when season info is displayed
+                    episodes: Vec::new(), 
                 })
             } else {
                 None
@@ -256,7 +259,6 @@ impl From<Torrent> for DownloadItem {
             None
         };
 
-        // Detect stalled status for torrents
         let mut final_status = detect_stalled_status(
             &torrent.download_state,
             torrent.download_speed,
@@ -268,15 +270,11 @@ impl From<Torrent> for DownloadItem {
             Some(&torrent.updated_at),
         );
         
-        // Optimize: Cache lowercase status for multiple contains() checks
         let status_lower_final = final_status.to_lowercase();
         
-        // If status is "uploading" but not active and download is finished, treat as cached/completed
-        // Only active uploading items should be considered "Seeding"
         if (status_lower_final.contains("uploading") || status_lower_final.contains("seeding")) 
             && !torrent.active 
             && torrent.download_finished {
-            // Change inactive finished uploading items to cached status
             final_status = if torrent.cached {
                 "cached".to_string()
             } else {
@@ -288,13 +286,49 @@ impl From<Torrent> for DownloadItem {
             final_status = "inactive".to_string();
         }
         
-        if !torrent.active && !torrent.download_finished 
+        let mut is_expired = false;
+        if let Some(expires_at) = &torrent.expires_at {
+            if let Ok(expires_time) = DateTime::parse_from_rfc3339(expires_at) {
+                let now = chrono::Utc::now();
+                let expires_utc = expires_time.with_timezone(&chrono::Utc);
+                if now > expires_utc {
+                    is_expired = true;
+                    if torrent.download_finished {
+                        final_status = if torrent.cached {
+                            "cached".to_string()
+                        } else {
+                            "completed".to_string()
+                        };
+                    }
+                }
+            }
+        }
+        
+        let status_lower_final = final_status.to_lowercase();
+        
+        if status_lower_final == "expired" {
+            if torrent.download_finished {
+                final_status = if torrent.cached {
+                    "cached".to_string()
+                } else {
+                    "completed".to_string()
+                };
+            } else {
+                final_status = "inactive".to_string();
+            }
+        }
+        
+        let status_lower_final = final_status.to_lowercase();
+        
+        if is_expired && !torrent.download_finished {
+            final_status = "inactive".to_string();
+        } else if !torrent.active && !torrent.download_finished 
             && final_status != "expired" 
             && !status_lower_final.contains("cached") 
             && !status_lower_final.contains("completed") 
             && !status_lower_final.contains("uploading") 
             && !status_lower_final.contains("seeding")
-            && !status_lower_final.contains("stalled") {  // Already handled above
+            && !status_lower_final.contains("stalled") {  
             final_status = "inactive".to_string();
         }
 
@@ -328,6 +362,11 @@ impl From<Torrent> for DownloadItem {
             eta: Some(torrent.eta),
             total_downloaded: Some(torrent.total_downloaded),
             private: torrent.private,
+            ratio: Some(torrent.ratio),
+            magnet: torrent.magnet,
+            source_url: None,
+            seeds: Some(torrent.seeds),
+            peers: Some(torrent.peers),
         }
     }
 }
@@ -347,27 +386,25 @@ impl From<WebDownload> for DownloadItem {
                        name_lower.contains("s8") ||
                        name_lower.contains("s9");
 
-        // Optimize: For seasons, only calculate count initially (defer episode list)
         let season_info = if is_season {
             Some(SeasonInfo {
                 season_number: extract_season_number(&web_dl.name),
                 episode_count: web_dl.files.len() as i32,
-                episodes: Vec::new(), // Load lazily when needed
+                episodes: Vec::new(), 
             })
         } else {
             None
         };
 
-        // Detect stalled status for web downloads (check if "checking" for > 6 hours)
         let final_status = detect_stalled_status(
             &web_dl.status,
-            0, // Web downloads don't have speed info
-            0, // No upload
-            None, // No active flag
-            None, // No seeds
-            None, // No peers
+            0, 
+            0, 
+            None, 
+            None, 
+            None, 
             &web_dl.created_at,
-            None, // Web downloads don't have updated_at
+            None, 
         );
 
         Self {
@@ -378,7 +415,7 @@ impl From<WebDownload> for DownloadItem {
             status: final_status,
             download_type: DownloadType::WebDownload,
             progress: web_dl.progress,
-            download_speed: 0, // Web downloads don't have speed info
+            download_speed: 0, 
             upload_speed: 0,
             active: web_dl.status.to_lowercase() == "downloading" || web_dl.status.to_lowercase() == "active",
             files: web_dl.files.into_iter().map(|f| DownloadFile {
@@ -397,9 +434,14 @@ impl From<WebDownload> for DownloadItem {
             }).collect(),
             is_season,
             season_info,
-            eta: None, // Web downloads don't have ETA
-            total_downloaded: None, // Web downloads don't have total_downloaded, calculate from progress
-            private: false, // Web downloads are not private trackers
+            eta: None, 
+            total_downloaded: None, 
+            private: false, 
+            ratio: None, 
+            magnet: None, 
+            source_url: Some(web_dl.url),
+            seeds: None, 
+            peers: None, 
         }
     }
 }
@@ -419,38 +461,32 @@ impl From<UsenetDownload> for DownloadItem {
                        name_lower.contains("s8") ||
                        name_lower.contains("s9");
 
-        // Optimize: For seasons, only calculate count initially (defer episode list)
         let season_info = if is_season {
             Some(SeasonInfo {
                 season_number: extract_season_number(&usenet.name),
                 episode_count: usenet.files.len() as i32,
-                episodes: Vec::new(), // Load lazily when needed
+                episodes: Vec::new(), 
             })
         } else {
             None
         };
 
-        // Detect stalled status for usenet downloads
         let mut final_status = detect_stalled_status(
             &usenet.download_state,
             usenet.download_speed,
-            0, // Usenet has no upload
+            0, 
             Some(usenet.active),
-            None, // No seeds for usenet
-            None, // No peers for usenet
+            None, 
+            None, 
             &usenet.created_at,
             Some(&usenet.updated_at),
         );
         
-        // Optimize: Cache lowercase status for multiple contains() checks
         let status_lower_final = final_status.to_lowercase();
         
-        // If status is "uploading" but not active and download is finished, treat as cached/completed
-        // Only active uploading items should be considered "Seeding"
         if (status_lower_final.contains("uploading") || status_lower_final.contains("seeding")) 
             && !usenet.active 
             && usenet.download_finished {
-            // Change inactive finished uploading items to cached status
             final_status = if usenet.cached {
                 "cached".to_string()
             } else {
@@ -458,7 +494,43 @@ impl From<UsenetDownload> for DownloadItem {
             };
         }
         
-        if !usenet.active && !usenet.download_finished 
+        let mut is_expired = false;
+        if let Some(expires_at) = &usenet.expires_at {
+            if let Ok(expires_time) = DateTime::parse_from_rfc3339(expires_at) {
+                let now = chrono::Utc::now();
+                let expires_utc = expires_time.with_timezone(&chrono::Utc);
+                if now > expires_utc {
+                    is_expired = true;
+                    if usenet.download_finished {
+                        final_status = if usenet.cached {
+                            "cached".to_string()
+                        } else {
+                            "completed".to_string()
+                        };
+                    }
+                }
+            }
+        }
+        
+        let status_lower_final = final_status.to_lowercase();
+        
+        if status_lower_final == "expired" {
+            if usenet.download_finished {
+                final_status = if usenet.cached {
+                    "cached".to_string()
+                } else {
+                    "completed".to_string()
+                };
+            } else {
+                final_status = "inactive".to_string();
+            }
+        }
+        
+        let status_lower_final = final_status.to_lowercase();
+        
+        if is_expired && !usenet.download_finished {
+            final_status = "inactive".to_string();
+        } else if !usenet.active && !usenet.download_finished 
             && final_status != "expired" 
             && !status_lower_final.contains("cached") 
             && !status_lower_final.contains("completed") 
@@ -495,8 +567,13 @@ impl From<UsenetDownload> for DownloadItem {
             is_season,
             season_info,
             eta: Some(usenet.eta),
-            total_downloaded: None, // Usenet doesn't have total_downloaded, calculate from progress
-            private: false, // Usenet downloads are not private trackers
+            total_downloaded: None, 
+            private: false, 
+            ratio: None, 
+            magnet: None, 
+            source_url: usenet.original_url,
+            seeds: None, 
+            peers: None, 
         }
     }
 }
@@ -526,13 +603,13 @@ fn format_size(bytes: i64) -> String {
     if bytes < 0 {
         return "Unknown".to_string();
     }
-    if bytes >= 1_099_511_627_776 { // 1 TB
+    if bytes >= 1_099_511_627_776 { 
         format!("{:.2} TB", bytes as f64 / 1_099_511_627_776.0)
-    } else if bytes >= 1_073_741_824 { // 1 GB
+    } else if bytes >= 1_073_741_824 { 
         format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
-    } else if bytes >= 1_048_576 { // 1 MB
+    } else if bytes >= 1_048_576 { 
         format!("{:.2} MB", bytes as f64 / 1_048_576.0)
-    } else if bytes >= 1024 { // 1 KB
+    } else if bytes >= 1024 { 
         format!("{:.2} KB", bytes as f64 / 1024.0)
     } else {
         format!("{} bytes", bytes)
@@ -748,12 +825,12 @@ fn get_status_priority(status: &str) -> u8 {
 fn get_status_color_style(status: &str) -> String {
     let normalized = normalize_status(status);
     match normalized.as_str() {
-        "Completed" | "Cached" => "color: #4ade80;".to_string(), // green-400
-        "Downloading" | "Seeding" | "Queued" => "color: #60a5fa;".to_string(), // blue-400
-        "Paused" => "color: #facc15;".to_string(), // yellow-400
-        "Stalled" | "Failed" => "color: #f87171;".to_string(), // red-400
-        "Inactive" | "Expired" => "color: #9ca3af;".to_string(), // gray-400
-        _ => "color: #94a3b8;".to_string(), // slate-400
+        "Completed" | "Cached" => "color: #4ade80;".to_string(), 
+        "Downloading" | "Seeding" | "Queued" => "color: #60a5fa;".to_string(), 
+        "Paused" => "color: #facc15;".to_string(), 
+        "Stalled" | "Failed" => "color: #f87171;".to_string(), 
+        "Inactive" | "Expired" => "color: #9ca3af;".to_string(), 
+        _ => "color: #94a3b8;".to_string(), 
     }
 }
 
@@ -809,6 +886,10 @@ pub fn DownloadsTable(
     }
     let show_bulk_actions = RwSignal::new(false);
     
+    let action_loading = RwSignal::new(std::collections::HashMap::<i32, String>::new()); 
+    let bulk_action_loading = RwSignal::new(false);
+    let action_errors = RwSignal::new(std::collections::HashMap::<i32, String>::new()); 
+    
     let open_dropdown = RwSignal::new(Option::<i32>::None);
     
     let status_filter = RwSignal::new("all".to_string());
@@ -837,7 +918,6 @@ pub fn DownloadsTable(
                                                 }
                                             }
                                             Err(_) => {
-                                                // Keep None if API call fails
                                             }
                                         }
                                     }
@@ -858,6 +938,15 @@ pub fn DownloadsTable(
             .map(|u| u.plan == 2)
             .unwrap_or(false)
     };
+    
+    let get_plan_name = move |plan: i32| -> String {
+        match plan {
+            1 => "Essential".to_string(),
+            2 => "Pro".to_string(),
+            3 => "Standard".to_string(),
+            _ => format!("Plan {}", plan),
+        }
+    };
 
     let fetch_downloads = move || {
         #[cfg(target_arch = "wasm32")]
@@ -871,7 +960,6 @@ pub fn DownloadsTable(
                 use wasm_bindgen_futures::JsFuture;
                 use web_sys::js_sys::Promise;
                 
-                // Use setTimeout for yielding - allows browser to render between batches
                 async fn yield_to_browser() {
                     let window = web_sys::window().unwrap();
                     let (tx, rx) = futures::channel::oneshot::channel();
@@ -886,7 +974,6 @@ pub fn DownloadsTable(
                     let _ = rx.await;
                 }
                 
-                // Simple microtask yield for less critical cases
                 async fn yield_microtask() {
                     let promise = Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED);
                     let _ = JsFuture::from(promise).await;
@@ -1010,7 +1097,6 @@ pub fn DownloadsTable(
                                 match queued_torrents_result {
                                     Ok(response) => {
                                         if let Some(data) = response.data {
-                                            // Handle both array response (when type is specified) and nested object (when no type)
                                             let torrents_array = if let Some(arr) = data.as_array() {
                                                 Some(arr.clone())
                                             } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
@@ -1047,7 +1133,6 @@ pub fn DownloadsTable(
                                 match queued_usenet_result {
                                     Ok(response) => {
                                         if let Some(data) = response.data {
-                                            // Handle both array response (when type is specified) and nested object (when no type)
                                             let usenet_array = if let Some(arr) = data.as_array() {
                                                 Some(arr.clone())
                                             } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
@@ -1081,11 +1166,9 @@ pub fn DownloadsTable(
                                 
                                 yield_to_browser().await;
                                 
-                                // Process queued web downloads
                                 match queued_webdl_result {
                                     Ok(response) => {
                                         if let Some(data) = response.data {
-                                            // Handle both array response (when type is specified) and nested object (when no type)
                                             let webdl_array = if let Some(arr) = data.as_array() {
                                                 Some(arr.clone())
                                             } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
@@ -1237,7 +1320,6 @@ pub fn DownloadsTable(
                     if let Ok(Some(storage)) = window.local_storage() {
                         if let Ok(Some(api_key)) = storage.get_item("api_key") {
                             if !api_key.is_empty() {
-                                // Use the same API key for the entire polling cycle
                                 let api_key_clone = api_key.clone();
                                 let client = TorboxClient::new(api_key_clone);
                                 let current_downloads = downloads_poll.get();
@@ -1247,7 +1329,6 @@ pub fn DownloadsTable(
                                     current_map.insert((item.id, item.download_type.clone()), idx);
                                 }
                                 
-                                // Use bypass_cache: false for consistency with initial fetch and to avoid wrong cached data
                                 let torrents_future = client.get_torrent_list(None, Some(false), None, None);
                                 let web_downloads_future = client.get_web_download_list(None, Some(false), None, None);
                                 let usenet_future = client.get_usenet_download_list(None, Some(false), None, None);
@@ -1316,10 +1397,8 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 
-                                // Process queued torrents
                                 if let Ok(response) = queued_torrents_result {
                                     if let Some(data) = response.data {
-                                        // Handle both array response (when type is specified) and nested object (when no type)
                                         let torrents_array = if let Some(arr) = data.as_array() {
                                             Some(arr.clone())
                                         } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
@@ -1347,10 +1426,8 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 
-                                // Process queued usenet
                                 if let Ok(response) = queued_usenet_result {
                                     if let Some(data) = response.data {
-                                        // Handle both array response (when type is specified) and nested object (when no type)
                                         let usenet_array = if let Some(arr) = data.as_array() {
                                             Some(arr.clone())
                                         } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
@@ -1378,10 +1455,8 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 
-                                // Process queued web downloads
                                 if let Ok(response) = queued_webdl_result {
                                     if let Some(data) = response.data {
-                                        // Handle both array response (when type is specified) and nested object (when no type)
                                         let webdl_array = if let Some(arr) = data.as_array() {
                                             Some(arr.clone())
                                         } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
@@ -1501,11 +1576,11 @@ pub fn DownloadsTable(
                     return true;
                 }
                 
-                if (filter_status == "error" || filter_status == "failed") && normalized_lower == "failed" {
+                if filter_status == "cached" && (normalized_lower == "cached" || normalized_lower == "completed") {
                     return true;
                 }
                 
-                if filter_status == "cached" && (normalized_lower == "cached" || normalized_lower == "completed") {
+                if filter_status == "inactive" && (normalized_lower == "paused" || normalized_lower == "stalled" || normalized_lower == "failed" || normalized_lower == "inactive" || normalized_lower == "unknown") {
                     return true;
                 }
                 
@@ -1634,11 +1709,16 @@ pub fn DownloadsTable(
 
     let handle_download = {
         let downloads_clone = downloads.clone();
+        let action_loading_clone = action_loading.clone();
         move |id: i32, download_type: DownloadType, file_id: Option<i32>| {
             #[cfg(target_arch = "wasm32")]
             {
                 let downloads_ref = downloads_clone.clone();
+                let action_loading_local = action_loading_clone.clone();
                 spawn_local(async move {
+                    let mut loading_map = action_loading_local.get();
+                    loading_map.insert(id, "download".to_string());
+                    action_loading_local.set(loading_map);
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
                             if let Ok(Some(api_key)) = storage.get_item("api_key") {
@@ -1647,6 +1727,9 @@ pub fn DownloadsTable(
                                         Ok(orig) => orig,
                                         Err(_) => {
                                             log!("Failed to get window origin");
+                                            let mut loading_map = action_loading_local.get();
+                                            loading_map.remove(&id);
+                                            action_loading_local.set(loading_map);
                                             return;
                                         }
                                     };
@@ -1675,7 +1758,10 @@ pub fn DownloadsTable(
                                     
                                     let client = reqwest::Client::new();
                                     
+                                    let action_errors_local = action_errors.clone();
+                                    
                                     if !file_ids_to_download.is_empty() {
+                                        let mut download_success = true;
                                         for fid in file_ids_to_download {
                                             let mut url = format!("{}{}?", origin, base_path);
                                             match download_type {
@@ -1717,18 +1803,35 @@ pub fn DownloadsTable(
                                                                         }
                                                                     }
                                                                 } else {
+                                                                    download_success = false;
+                                                                    let mut error_map = action_errors_local.get();
+                                                                    error_map.insert(id, format!("Download response missing data field for file_id {}", fid));
+                                                                    action_errors_local.set(error_map);
                                                                     log!("Download response missing data field for file_id {}", fid);
                                                                 }
                                                             }
                                                             Err(e) => {
+                                                                download_success = false;
+                                                                let mut error_map = action_errors_local.get();
+                                                                error_map.insert(id, format!("Failed to parse download response: {:?}", e));
+                                                                action_errors_local.set(error_map);
                                                                 log!("Failed to parse download response for file_id {}: {:?}", fid, e);
                                                             }
                                                         }
                                                     } else {
-                                                        log!("Download request failed for file_id {} with status: {}", fid, response.status());
+                                                        download_success = false;
+                                                        let status = response.status();
+                                                        let mut error_map = action_errors_local.get();
+                                                        error_map.insert(id, format!("Download request failed with status: {}", status));
+                                                        action_errors_local.set(error_map);
+                                                        log!("Download request failed for file_id {} with status: {}", fid, status);
                                                     }
                                                 }
                                                 Err(e) => {
+                                                    download_success = false;
+                                                    let mut error_map = action_errors_local.get();
+                                                    error_map.insert(id, format!("Failed to request download: {:?}", e));
+                                                    action_errors_local.set(error_map);
                                                     log!("Failed to request download for file_id {}: {:?}", fid, e);
                                                 }
                                             }
@@ -1746,6 +1849,43 @@ pub fn DownloadsTable(
                                             }
                                             let _ = rx.await;
                                         }
+                                        
+                                        let (tx, rx) = futures::channel::oneshot::channel();
+                                        if let Some(window_for_delay) = web_sys::window() {
+                                            let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                let _ = tx.send(());
+                                            });
+                                            let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                closure.as_ref().unchecked_ref(),
+                                                500,
+                                            );
+                                            closure.forget();
+                                        }
+                                        let _ = rx.await;
+                                        
+                                        let mut loading_map = action_loading_local.get();
+                                        loading_map.remove(&id);
+                                        action_loading_local.set(loading_map);
+                                        
+                                        if download_success {
+                                            let (tx, rx) = futures::channel::oneshot::channel();
+                                            if let Some(window_for_delay) = web_sys::window() {
+                                                let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                    let _ = tx.send(());
+                                                });
+                                                let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                    closure.as_ref().unchecked_ref(),
+                                                    5000,
+                                                );
+                                                closure.forget();
+                                            }
+                                            spawn_local(async move {
+                                                let _ = rx.await;
+                                                let mut error_map = action_errors_local.get();
+                                                error_map.remove(&id);
+                                                action_errors_local.set(error_map);
+                                            });
+                                        }
                                     } else {
                                         let mut url = format!("{}{}?", origin, base_path);
                                         match download_type {
@@ -1760,6 +1900,7 @@ pub fn DownloadsTable(
                                             }
                                         }
                                         
+                                        let mut download_success = false;
                                         match client
                                             .get(&url)
                                             .header("Authorization", format!("Bearer {}", api_key))
@@ -1771,7 +1912,6 @@ pub fn DownloadsTable(
                                                     match response.json::<serde_json::Value>().await {
                                                         Ok(json) => {
                                                             if let Some(download_url) = json.get("data").and_then(|d| d.as_str()) {
-                                                                // Create a temporary anchor element to trigger download
                                                                 if let Some(document) = window.document() {
                                                                     if let Ok(anchor) = document.create_element("a") {
                                                                         if let Ok(anchor) = anchor.dyn_into::<web_sys::HtmlAnchorElement>() {
@@ -1786,21 +1926,73 @@ pub fn DownloadsTable(
                                                                         }
                                                                     }
                                                                 }
+                                                                download_success = true;
                                                             } else {
+                                                                let mut error_map = action_errors_local.get();
+                                                                error_map.insert(id, "Download response missing data field".to_string());
+                                                                action_errors_local.set(error_map);
                                                                 log!("Download response missing data field");
                                                             }
                                                         }
                                                         Err(e) => {
+                                                            let mut error_map = action_errors_local.get();
+                                                            error_map.insert(id, format!("Failed to parse download response: {:?}", e));
+                                                            action_errors_local.set(error_map);
                                                             log!("Failed to parse download response: {:?}", e);
                                                         }
                                                     }
                                                 } else {
-                                                    log!("Download request failed with status: {}", response.status());
+                                                    let status = response.status();
+                                                    let mut error_map = action_errors_local.get();
+                                                    error_map.insert(id, format!("Download request failed with status: {}", status));
+                                                    action_errors_local.set(error_map);
+                                                    log!("Download request failed with status: {}", status);
                                                 }
                                             }
                                             Err(e) => {
+                                                let mut error_map = action_errors_local.get();
+                                                error_map.insert(id, format!("Failed to request download: {:?}", e));
+                                                action_errors_local.set(error_map);
                                                 log!("Failed to request download: {:?}", e);
                                             }
+                                        }
+                                        
+                                        let (tx, rx) = futures::channel::oneshot::channel();
+                                        if let Some(window_for_delay) = web_sys::window() {
+                                            let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                let _ = tx.send(());
+                                            });
+                                            let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                closure.as_ref().unchecked_ref(),
+                                                500,
+                                            );
+                                            closure.forget();
+                                        }
+                                        let _ = rx.await;
+                                        
+                                        let mut loading_map = action_loading_local.get();
+                                        loading_map.remove(&id);
+                                        action_loading_local.set(loading_map);
+                                        
+                                        if download_success {
+                                            let action_errors_clear = action_errors_local.clone();
+                                            let (tx, rx) = futures::channel::oneshot::channel();
+                                            if let Some(window_for_delay) = web_sys::window() {
+                                                let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                    let _ = tx.send(());
+                                                });
+                                                let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                    closure.as_ref().unchecked_ref(),
+                                                    5000,
+                                                );
+                                                closure.forget();
+                                            }
+                                            spawn_local(async move {
+                                                let _ = rx.await;
+                                                let mut error_map = action_errors_clear.get();
+                                                error_map.remove(&id);
+                                                action_errors_clear.set(error_map);
+                                            });
                                         }
                                     }
                                 }
@@ -1812,69 +2004,96 @@ pub fn DownloadsTable(
         }
     };
 
-    let handle_delete = move |id: i32, download_type: DownloadType| {
-        #[cfg(target_arch = "wasm32")]
-        {
-            spawn_local(async move {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        if let Ok(Some(api_key)) = storage.get_item("api_key") {
-                            if !api_key.is_empty() {
-                                let client = TorboxClient::new(api_key);
-                                
-                                match download_type {
-                                    DownloadType::Torrent => {
-                                        match client.control_torrent("delete".to_string(), id, false).await {
-                                            Ok(_) => {
-                                                log!("Torrent deleted successfully: {}", id);
-                                                fetch_downloads();
-                                            }
-                                            Err(e) => {
-                                                log!("Failed to delete torrent: {:?}", e);
-                                            }
+    let handle_delete = {
+        let action_loading_clone = action_loading.clone();
+        let action_errors_clone = action_errors.clone();
+        let fetch_downloads_clone = fetch_downloads.clone();
+        move |id: i32, download_type: DownloadType| {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let action_loading_local = action_loading_clone.clone();
+                let action_errors_local = action_errors_clone.clone();
+                let fetch_downloads_local = fetch_downloads_clone.clone();
+                spawn_local(async move {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                if !api_key.is_empty() {
+                                    let client = TorboxClient::new(api_key);
+                                    
+                                    let mut loading_map = action_loading_local.get();
+                                    loading_map.insert(id, "delete".to_string());
+                                    action_loading_local.set(loading_map);
+                                    
+                                    let result = match download_type {
+                                        DownloadType::Torrent => {
+                                            client.control_torrent("delete".to_string(), id, false).await
                                         }
-                                    }
-                                    DownloadType::WebDownload => {
-                                        match client.control_web_download("delete".to_string(), id, false).await {
-                                            Ok(_) => {
-                                                log!("Web download deleted successfully: {}", id);
-                                                fetch_downloads();
-                                            }
-                                            Err(e) => {
-                                                log!("Failed to delete web download: {:?}", e);
-                                            }
+                                        DownloadType::WebDownload => {
+                                            client.control_web_download("delete".to_string(), id, false).await
                                         }
-                                    }
-                                    DownloadType::Usenet => {
-                                        match client.control_usenet_download("delete".to_string(), id, false).await {
-                                            Ok(_) => {
-                                                log!("Usenet download deleted successfully: {}", id);
-                                                fetch_downloads();
+                                        DownloadType::Usenet => {
+                                            client.control_usenet_download("delete".to_string(), id, false).await
+                                        }
+                                    };
+                                    
+                                    let mut loading_map = action_loading_local.get();
+                                    loading_map.remove(&id);
+                                    action_loading_local.set(loading_map);
+                                    
+                                    match result {
+                                        Ok(_) => {
+                                            log!("Download deleted successfully: {}", id);
+                                            fetch_downloads_local();
+                                        }
+                                        Err(e) => {
+                                            let mut error_map = action_errors_local.get();
+                                            error_map.insert(id, format!("Failed to delete: {:?}", e));
+                                            action_errors_local.set(error_map);
+                                            log!("Failed to delete download: {:?}", e);
+                                            
+                                            let (tx, rx) = futures::channel::oneshot::channel();
+                                            if let Some(window_for_delay) = web_sys::window() {
+                                                let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                    let _ = tx.send(());
+                                                });
+                                                let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                    closure.as_ref().unchecked_ref(),
+                                                    5000,
+                                                );
+                                                closure.forget();
                                             }
-                                            Err(e) => {
-                                                log!("Failed to delete usenet download: {:?}", e);
-                                            }
+                                            spawn_local(async move {
+                                                let _ = rx.await;
+                                                let mut error_map = action_errors_local.get();
+                                                error_map.remove(&id);
+                                                action_errors_local.set(error_map);
+                                            });
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
         }
     };
 
-    let handle_bulk_download = move || {
-        let state = selection_state.get();
-        let selected_items = state.selected_items;
-        let downloads_clone = downloads.clone();
-        
-        #[cfg(target_arch = "wasm32")]
-        {
-            spawn_local(async move {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
+    let handle_bulk_download = {
+        let bulk_action_loading_clone = bulk_action_loading.clone();
+        move || {
+            let state = selection_state.get();
+            let selected_items = state.selected_items;
+            let downloads_clone = downloads.clone();
+            
+            #[cfg(target_arch = "wasm32")]
+            {
+                let bulk_action_loading_local = bulk_action_loading_clone.clone();
+                bulk_action_loading_local.set(true);
+                spawn_local(async move {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
                             if let Ok(Some(api_key)) = storage.get_item("api_key") {
                                 if !api_key.is_empty() {
                                     let downloads_list = downloads_clone.get();
@@ -1936,7 +2155,6 @@ pub fn DownloadsTable(
                                                         match response.json::<serde_json::Value>().await {
                                                             Ok(json) => {
                                                                 if let Some(download_url) = json.get("data").and_then(|d| d.as_str()) {
-                                                                    // Create a temporary anchor element to trigger download
                                                                     if let Some(window) = window_clone {
                                                                         if let Some(document) = window.document() {
                                                                             if let Ok(anchor) = document.create_element("a") {
@@ -1993,14 +2211,152 @@ pub fn DownloadsTable(
                             }
                         }
                     }
-                }
-            });
+                    }
+                    bulk_action_loading_local.set(false);
+                });
+            }
+        }
+    };
+
+    let handle_copy_link = {
+        let downloads_clone = downloads.clone();
+        move |id: i32, download_type: DownloadType, file_id: Option<i32>| {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let downloads_ref = downloads_clone.clone();
+                spawn_local(async move {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                if !api_key.is_empty() {
+                                    let origin = match window.location().origin() {
+                                        Ok(orig) => orig,
+                                        Err(_) => {
+                                            log!("Failed to get window origin");
+                                            return;
+                                        }
+                                    };
+                                    
+                                    let link_to_copy = if let Some(fid) = file_id {
+                                        let base_path = match download_type {
+                                            DownloadType::Torrent => "/api/torrents/download",
+                                            DownloadType::WebDownload => "/api/webdl/download",
+                                            DownloadType::Usenet => "/api/usenet/download",
+                                        };
+                                        
+                                        let mut url = format!("{}{}?", origin, base_path);
+                                        match download_type {
+                                            DownloadType::Torrent => {
+                                                url.push_str(&format!("torrent_id={}", id));
+                                            }
+                                            DownloadType::WebDownload => {
+                                                url.push_str(&format!("web_id={}", id));
+                                            }
+                                            DownloadType::Usenet => {
+                                                url.push_str(&format!("usenet_id={}", id));
+                                            }
+                                        }
+                                        url.push_str(&format!("&file_id={}", fid));
+                                        
+                                        let client = reqwest::Client::new();
+                                        match client
+                                            .get(&url)
+                                            .header("Authorization", format!("Bearer {}", api_key.clone()))
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(response) => {
+                                                if response.status().is_success() {
+                                                    match response.json::<serde_json::Value>().await {
+                                                        Ok(json) => {
+                                                            json.get("data")
+                                                                .and_then(|d| d.as_str())
+                                                                .map(|s| s.to_string())
+                                                        }
+                                                        Err(_) => None,
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            }
+                                            Err(_) => None,
+                                        }
+                                    } else {
+                                        let downloads_list = downloads_ref.get();
+                                        downloads_list.iter()
+                                            .find(|d| d.id == id)
+                                            .and_then(|d| {
+                                                match download_type {
+                                                    DownloadType::Torrent => d.magnet.clone(),
+                                                    DownloadType::WebDownload => d.source_url.clone(),
+                                                    DownloadType::Usenet => d.source_url.clone(),
+                                                }
+                                            })
+                                    };
+                                    
+                                    if let Some(link) = link_to_copy {
+                                        let clipboard = window.navigator().clipboard();
+                                        let promise = clipboard.write_text(&link);
+                                        use wasm_bindgen_futures::JsFuture;
+                                        if let Ok(_) = JsFuture::from(promise).await {
+                                            log!("Link copied to clipboard");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    };
+
+    let handle_bulk_copy_links = {
+        let downloads_clone = downloads.clone();
+        move || {
+            let state = selection_state.get();
+            let selected_items = state.selected_items;
+            
+            #[cfg(target_arch = "wasm32")]
+            {
+                spawn_local(async move {
+                    if let Some(window) = web_sys::window() {
+                        let downloads_list = downloads_clone.get();
+                        let mut links = Vec::new();
+                        
+                        for item_id in selected_items {
+                            if let Some(download) = downloads_list.iter().find(|d| d.id == item_id) {
+                                let link = match download.download_type {
+                                    DownloadType::Torrent => download.magnet.clone(),
+                                    DownloadType::WebDownload => download.source_url.clone(),
+                                    DownloadType::Usenet => download.source_url.clone(),
+                                };
+                                
+                                if let Some(l) = link {
+                                    links.push(l);
+                                }
+                            }
+                        }
+                        
+                        if !links.is_empty() {
+                            let links_text = links.join("\n");
+                            let clipboard = window.navigator().clipboard();
+                            let promise = clipboard.write_text(&links_text);
+                            use wasm_bindgen_futures::JsFuture;
+                            if let Ok(_) = JsFuture::from(promise).await {
+                                log!("Links copied to clipboard");
+                            }
+                        }
+                    }
+                });
+            }
         }
     };
 
     let handle_bulk_delete = {
         let fetch_downloads_clone = fetch_downloads.clone();
         let clear_selection_clone = clear_selection.clone();
+        let bulk_action_loading_clone = bulk_action_loading.clone();
         move || {
             let state = selection_state.get();
             let selected_items = state.selected_items.clone();
@@ -2008,6 +2364,8 @@ pub fn DownloadsTable(
         
         #[cfg(target_arch = "wasm32")]
         {
+            let bulk_action_loading_local = bulk_action_loading_clone.clone();
+            bulk_action_loading_local.set(true);
             spawn_local(async move {
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
@@ -2076,7 +2434,6 @@ pub fn DownloadsTable(
                                         }
                                     }).collect();
                                     
-                                    // Wait for all concurrent deletes in this chunk
                                     let results = futures::future::join_all(futures).await;
                                     for result in results {
                                         match result {
@@ -2085,9 +2442,7 @@ pub fn DownloadsTable(
                                         }
                                     }
                                     
-                                    // Delay before next chunk (rate limiting)
                                     if chunk.len() == CONCURRENT_DELETES {
-                                        // Simple delay using setTimeout via wasm-bindgen
                                         let delay_ms = DELAY_MS;
                                         let (tx, rx) = futures::channel::oneshot::channel();
                                         if let Some(window) = web_sys::window() {
@@ -2108,6 +2463,7 @@ pub fn DownloadsTable(
                                 
                                 fetch_downloads_clone();
                                 clear_selection_clone();
+                                bulk_action_loading_local.set(false);
                             }
                         }
                     }
@@ -2117,74 +2473,16 @@ pub fn DownloadsTable(
         }
     };
 
-    // Function to handle pause/resume action
-    let handle_pause_resume = move |id: i32, download_type: DownloadType, current_status: String| {
-        #[cfg(target_arch = "wasm32")]
-        {
-            spawn_local(async move {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        if let Ok(Some(api_key)) = storage.get_item("api_key") {
-                            if !api_key.is_empty() {
-                                let client = TorboxClient::new(api_key);
-                                
-                                // Determine operation based on current status
-                                let operation = match current_status.to_lowercase().as_str() {
-                                    "downloading" | "active" | "seeding" => "stop_seeding",
-                                    "paused" | "stopped" | "stalled" => "resume",
-                                    _ => "stop_seeding", // Default to stop_seeding for completed/cached items
-                                };
-                                
-                                match download_type {
-                                    DownloadType::Torrent => {
-                                        match client.control_torrent(operation.to_string(), id, false).await {
-                                            Ok(_) => {
-                                                log!("Torrent {} successfully: {}", operation, id);
-                                                fetch_downloads();
-                                            }
-                                            Err(e) => {
-                                                log!("Failed to {} torrent: {:?}", operation, e);
-                                            }
-                                        }
-                                    }
-                                    DownloadType::WebDownload => {
-                                        match client.control_web_download(operation.to_string(), id, false).await {
-                                            Ok(_) => {
-                                                log!("Web download {} successfully: {}", operation, id);
-                                                fetch_downloads();
-                                            }
-                                            Err(e) => {
-                                                log!("Failed to {} web download: {:?}", operation, e);
-                                            }
-                                        }
-                                    }
-                                    DownloadType::Usenet => {
-                                        match client.control_usenet_download(operation.to_string(), id, false).await {
-                                            Ok(_) => {
-                                                log!("Usenet download {} successfully: {}", operation, id);
-                                                fetch_downloads();
-                                            }
-                                            Err(e) => {
-                                                log!("Failed to {} usenet download: {:?}", operation, e);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    };
-
-    // Function to handle streaming action
-    let handle_stream = {
-        let downloads_clone = downloads.clone();
-        move |id: i32, download_type: DownloadType, file_id: Option<i32>| {
+    let handle_stop_resume = {
+        let action_loading_clone = action_loading.clone();
+        let action_errors_clone = action_errors.clone();
+        let fetch_downloads_clone = fetch_downloads.clone();
+        move |id: i32, download_type: DownloadType, current_status: String| {
             #[cfg(target_arch = "wasm32")]
             {
-                let downloads_ref = downloads_clone.clone();
+                let action_loading_local = action_loading_clone.clone();
+                let action_errors_local = action_errors_clone.clone();
+                let fetch_downloads_local = fetch_downloads_clone.clone();
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
@@ -2192,18 +2490,94 @@ pub fn DownloadsTable(
                                 if !api_key.is_empty() {
                                     let client = TorboxClient::new(api_key);
                                     
+                                    let status_lower = current_status.to_lowercase();
+                                    let operation = if download_type == DownloadType::Torrent {
+                                        if status_lower == "downloading" || status_lower == "active" {
+                                            "stop"
+                                        } else if status_lower == "seeding" || status_lower == "completed" || status_lower == "cached" 
+                                            || status_lower.contains("seeding") || status_lower.contains("uploading") {
+                                            "stop_seeding"
+                                        } else if status_lower == "paused" || status_lower == "stopped" || status_lower.contains("stalled") {
+                                            "resume"
+                                        } else {
+                                            "stop"
+                                        }
+                                    } else {
+                                        match status_lower.as_str() {
+                                            "downloading" | "active" => "stop",
+                                            "paused" | "stopped" | "stalled" => "resume",
+                                            _ => "stop",
+                                        }
+                                    };
+                                    
+                                    let mut loading_map = action_loading_local.get();
+                                    loading_map.insert(id, "stop_resume".to_string());
+                                    action_loading_local.set(loading_map);
+                                    
+                                    let result = match download_type {
+                                        DownloadType::Torrent => {
+                                            client.control_torrent(operation.to_string(), id, false).await
+                                        }
+                                        DownloadType::WebDownload => {
+                                            client.control_web_download(operation.to_string(), id, false).await
+                                        }
+                                        DownloadType::Usenet => {
+                                            client.control_usenet_download(operation.to_string(), id, false).await
+                                        }
+                                    };
+                                    
+                                    let mut loading_map = action_loading_local.get();
+                                    loading_map.remove(&id);
+                                    action_loading_local.set(loading_map);
+                                    
+                                    match result {
+                                        Ok(_) => {
+                                            log!("Download {} successfully: {}", operation, id);
+                                            fetch_downloads_local();
+                                        }
+                                        Err(e) => {
+                                            log!("Failed to {} download: {:?}", operation, e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    };
+
+    let handle_stream = {
+        let downloads_clone = downloads.clone();
+        let action_loading_clone = action_loading.clone();
+        let action_errors_clone = action_errors.clone();
+        move |id: i32, download_type: DownloadType, file_id: Option<i32>| {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let downloads_ref = downloads_clone.clone();
+                let action_loading_local = action_loading_clone.clone();
+                let action_errors_local = action_errors_clone.clone();
+                spawn_local(async move {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                if !api_key.is_empty() {
+                                    let client = TorboxClient::new(api_key);
+                                    
+                                    let mut loading_map = action_loading_local.get();
+                                    loading_map.insert(id, "stream".to_string());
+                                    action_loading_local.set(loading_map);
+                                    
                                     let stream_type = match download_type {
                                         DownloadType::Torrent => "torrent",
                                         DownloadType::WebDownload => "webdownload",
                                         DownloadType::Usenet => "usenet",
                                     };
                                     
-                                    // Determine which file_id to use for streaming
                                     let final_file_id = if let Some(fid) = file_id {
-                                        // Specific file requested (from sub-table)
                                         Some(fid)
                                     } else {
-                                        // Main stream button - find largest video file
                                         let downloads_list = downloads_ref.get();
                                         if let Some(download) = downloads_list.iter().find(|d| d.id == id) {
                                             get_largest_video_file(&download.files).map(|f| f.id)
@@ -2213,6 +2587,9 @@ pub fn DownloadsTable(
                                     };
                                     
                                     if final_file_id.is_none() {
+                                        let mut loading_map = action_loading_local.get();
+                                        loading_map.remove(&id);
+                                        action_loading_local.set(loading_map);
                                         log!("No video file found for streaming download ID: {}", id);
                                         return;
                                     }
@@ -2225,58 +2602,82 @@ pub fn DownloadsTable(
                                         chosen_audio_index: Some(0),
                                     };
                                 
-                                match client.create_stream(request).await {
-                                    Ok(response) => {
-                                        if let Some(stream_data) = response.data {
-                                            log!("Stream created for ID: {}", id);
-                                            if let Some(window) = web_sys::window() {
-                                                let encoded_url = js_sys::encode_uri_component(&stream_data.stream_url);
-                                                let mut player_url = format!("/stream?url={}", encoded_url.as_string().unwrap_or_default());
-                                                
-                                                // Add presigned token and user token for subtitle/audio switching
-                                                let encoded_token = js_sys::encode_uri_component(&stream_data.presigned_token);
-                                                player_url.push_str(&format!("&presigned_token={}", encoded_token.as_string().unwrap_or_default()));
-                                                if let Some(user_token) = &stream_data.user_token {
-                                                    let encoded_user_token = js_sys::encode_uri_component(user_token);
-                                                    player_url.push_str(&format!("&user_token={}", encoded_user_token.as_string().unwrap_or_default()));
-                                                }
-                                                // Add metadata if available
-                                                if let Some(metadata) = &stream_data.metadata {
-                                                    if let Ok(metadata_json) = serde_json::to_string(metadata) {
-                                                        let encoded_metadata = js_sys::encode_uri_component(&metadata_json);
-                                                        player_url.push_str(&format!("&metadata={}", encoded_metadata.as_string().unwrap_or_default()));
+                                    let result = client.create_stream(request).await;
+                                    
+                                    let mut loading_map = action_loading_local.get();
+                                    loading_map.remove(&id);
+                                    action_loading_local.set(loading_map);
+                                
+                                    match result {
+                                        Ok(response) => {
+                                            if let Some(stream_data) = response.data {
+                                                log!("Stream created for ID: {}", id);
+                                                if let Some(window) = web_sys::window() {
+                                                    let encoded_url = js_sys::encode_uri_component(&stream_data.stream_url);
+                                                    let mut player_url = format!("/stream?url={}", encoded_url.as_string().unwrap_or_default());
+                                                    
+                                                    let encoded_token = js_sys::encode_uri_component(&stream_data.presigned_token);
+                                                    player_url.push_str(&format!("&presigned_token={}", encoded_token.as_string().unwrap_or_default()));
+                                                    if let Some(user_token) = &stream_data.user_token {
+                                                        let encoded_user_token = js_sys::encode_uri_component(user_token);
+                                                        player_url.push_str(&format!("&user_token={}", encoded_user_token.as_string().unwrap_or_default()));
                                                     }
-                                                }
-                                                // Add subtitle URLs if available (from stream response, not metadata)
-                                                if let Some(subtitles) = &stream_data.subtitles {
-                                                    if !subtitles.is_empty() {
-                                                        if let Ok(subtitles_json) = serde_json::to_string(subtitles) {
-                                                            let encoded_subtitles = js_sys::encode_uri_component(&subtitles_json);
-                                                            player_url.push_str(&format!("&subtitle_urls={}", encoded_subtitles.as_string().unwrap_or_default()));
+                                                    if let Some(metadata) = &stream_data.metadata {
+                                                        if let Ok(metadata_json) = serde_json::to_string(metadata) {
+                                                            let encoded_metadata = js_sys::encode_uri_component(&metadata_json);
+                                                            player_url.push_str(&format!("&metadata={}", encoded_metadata.as_string().unwrap_or_default()));
                                                         }
                                                     }
-                                                }
-                                                
-                                                if let Ok(_) = window.open_with_url_and_target(&player_url, "_blank") {
-                                                    log!("Stream opened for ID: {}", id);
+                                                    if let Some(subtitles) = &stream_data.subtitles {
+                                                        if !subtitles.is_empty() {
+                                                            if let Ok(subtitles_json) = serde_json::to_string(subtitles) {
+                                                                let encoded_subtitles = js_sys::encode_uri_component(&subtitles_json);
+                                                                player_url.push_str(&format!("&subtitle_urls={}", encoded_subtitles.as_string().unwrap_or_default()));
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    if let Ok(_) = window.open_with_url_and_target(&player_url, "_blank") {
+                                                        log!("Stream opened for ID: {}", id);
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
-                                    Err(e) => {
-                                        log!("Failed to create stream: {:?}", e);
+                                        Err(e) => {
+                                            let action_errors_local = action_errors.clone();
+                                            let mut error_map = action_errors_local.get();
+                                            error_map.insert(id, format!("Failed to create stream: {:?}", e));
+                                            action_errors_local.set(error_map);
+                                            log!("Failed to create stream: {:?}", e);
+                                            
+                                            let (tx, rx) = futures::channel::oneshot::channel();
+                                            if let Some(window_for_delay) = web_sys::window() {
+                                                let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                    let _ = tx.send(());
+                                                });
+                                                let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                    closure.as_ref().unchecked_ref(),
+                                                    5000,
+                                                );
+                                                closure.forget();
+                                            }
+                                            spawn_local(async move {
+                                                let _ = rx.await;
+                                                let mut error_map = action_errors_local.get();
+                                                error_map.remove(&id);
+                                                action_errors_local.set(error_map);
+                                            });
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            });
-        }
+                });
+            }
         }
     };
 
-    // Function to handle reannounce action (for stalled torrents)
     let handle_reannounce = move |id: i32, download_type: DownloadType| {
         #[cfg(target_arch = "wasm32")]
         {
@@ -2311,7 +2712,6 @@ pub fn DownloadsTable(
         }
     };
 
-    // Function to handle cloud upload action
     let handle_cloud_upload = move |id: i32, download_type: DownloadType, provider: String| {
         #[cfg(target_arch = "wasm32")]
         {
@@ -2331,7 +2731,7 @@ pub fn DownloadsTable(
                                         DownloadType::WebDownload => "webdl".to_string(),
                                         DownloadType::Usenet => "usenet".to_string(),
                                     },
-                                    token: String::new(), // Empty token for now - would need to be provided by user
+                                    token: String::new(),
                                 };
                                 
                                 match provider.as_str() {
@@ -2380,10 +2780,14 @@ pub fn DownloadsTable(
         }
     };
 
-    // Helper functions to determine if actions should be enabled
     let is_download_enabled = move |status: &str| -> bool {
         let status_lower = status.to_lowercase();
-        status_lower == "completed" || status_lower == "cached" || status_lower.contains("seeding")
+        if status_lower == "paused" || status_lower == "stopped" || status_lower.contains("stopped") 
+            || status_lower.contains("stalled") || status_lower == "failed" 
+            || status_lower == "inactive" || status_lower == "unknown" || status_lower.contains("error") {
+            return false;
+        }
+        status_lower == "completed" || status_lower == "cached" || (status_lower.contains("seeding") && !status_lower.contains("stopped"))
     };
 
     let is_pause_resume_enabled = move |status: &str| -> bool {
@@ -2393,14 +2797,16 @@ pub fn DownloadsTable(
     };
 
     let is_stream_enabled = move |status: &str| -> bool {
-        // Check if user has plan 2 first
         if !has_streaming_plan() {
             return false;
         }
-        // Then check if download status allows streaming
-        // Seeding (including variants like "seeding (no peers)") means the file is completed and ready
         let status_lower = status.to_lowercase();
-        status_lower == "completed" || status_lower == "cached" || status_lower.contains("seeding")
+        if status_lower == "paused" || status_lower == "stopped" || status_lower.contains("stopped") 
+            || status_lower.contains("stalled") || status_lower == "failed" 
+            || status_lower == "inactive" || status_lower == "unknown" || status_lower.contains("error") {
+            return false;
+        }
+        status_lower == "completed" || status_lower == "cached" || (status_lower.contains("seeding") && !status_lower.contains("stopped"))
     };
 
     let is_reannounce_enabled = move |status: &str, download_type: DownloadType| -> bool {
@@ -2413,19 +2819,22 @@ pub fn DownloadsTable(
 
     let is_cloud_upload_enabled = move |status: &str| -> bool {
         let status_lower = status.to_lowercase();
-        status_lower == "completed" || status_lower == "cached" || status_lower.contains("seeding")
+        if status_lower == "paused" || status_lower == "stopped" || status_lower.contains("stopped") 
+            || status_lower.contains("stalled") || status_lower == "failed" 
+            || status_lower == "inactive" || status_lower == "unknown" || status_lower.contains("error") {
+            return false;
+        }
+        status_lower == "completed" || status_lower == "cached" || (status_lower.contains("seeding") && !status_lower.contains("stopped"))
     };
 
     let is_delete_enabled = move |_status: &str| -> bool {
-        true // Delete is always available
+        true
     };
 
-    // Function to get download counts by type and status
     let get_download_counts = move || {
         let all_downloads = downloads.get();
         let mut counts = std::collections::HashMap::new();
         
-        // Initialize counts
         counts.insert("total", all_downloads.len());
         counts.insert("torrents", 0);
         counts.insert("usenet", 0);
@@ -2438,10 +2847,8 @@ pub fn DownloadsTable(
         counts.insert("queued", 0);
         counts.insert("stalled", 0);
         counts.insert("inactive", 0);
-        counts.insert("expired", 0);
         
         for download in &all_downloads {
-            // Count by type
             match download.download_type {
                 DownloadType::Torrent => {
                     *counts.get_mut("torrents").unwrap() += 1;
@@ -2454,11 +2861,9 @@ pub fn DownloadsTable(
                 }
             }
             
-            // Count by normalized status
             let normalized = normalize_status(&download.status);
             match normalized.as_str() {
                 "Completed" | "Cached" => {
-                    // Merge completed and cached into single "cached" count for filtering
                     *counts.get_mut("cached").unwrap() += 1;
                 }
                 "Downloading" => {
@@ -2467,26 +2872,17 @@ pub fn DownloadsTable(
                 "Seeding" => {
                     *counts.get_mut("seeding").unwrap() += 1;
                 }
-                "Paused" => {
-                    *counts.get_mut("paused").unwrap() += 1;
-                }
-                "Failed" => {
-                    *counts.get_mut("error").unwrap() += 1;
-                }
                 "Queued" => {
                     *counts.get_mut("queued").unwrap() += 1;
                 }
-                "Stalled" => {
-                    *counts.get_mut("stalled").unwrap() += 1;
-                }
-                "Inactive" => {
+                "Paused" | "Stalled" | "Failed" | "Inactive" | "Unknown" => {
                     *counts.get_mut("inactive").unwrap() += 1;
                 }
                 "Expired" => {
-                    *counts.get_mut("expired").unwrap() += 1;
+                    *counts.get_mut("inactive").unwrap() += 1;
                 }
                 _ => {
-                    // Unknown status - could increment a counter if needed
+                    *counts.get_mut("inactive").unwrap() += 1;
                 }
             }
         }
@@ -2496,20 +2892,15 @@ pub fn DownloadsTable(
 
     view! {
         <div class="w-full">
-            // Download Counts and Filter/Sort Controls
             <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mb-6">
-                // Download Counts Section
                 <div class="flex-shrink-0 lg:w-auto lg:min-w-0">
                     <div class="p-4">
-                        // Type Counts
                         <div class="space-y-3">
-                            // Total row
                             <div class="flex justify-center items-center text-sm" style="gap: 8px;">
                                 <span style="color: var(--text-secondary);">"Total:"</span>
                                 <span class="font-medium" style="color: var(--text-primary);">{move || *get_download_counts().get("total").unwrap_or(&0)}</span>
                             </div>
                             
-                            // Individual types in horizontal row (clickable)
                             <div class="flex flex-wrap gap-x-4 gap-y-1 items-center text-sm">
                                 {
                                     let type_filter_torrent = type_filter.clone();
@@ -2597,11 +2988,9 @@ pub fn DownloadsTable(
                     </div>
                 </div>
                 
-                // Filter and Sort Controls
                 <div class="flex-1 min-w-0">
                     <div class="p-4">
                         <div class="flex flex-col gap-3">
-                            // Status Filter - Badge-based clickable filters
                             <div class="flex flex-col gap-2">
                                 <label class="block text-xs font-medium" style="color: var(--text-secondary);">"Status"</label>
                                 <div class="flex flex-wrap gap-1.5 md:gap-3">
@@ -2609,14 +2998,13 @@ pub fn DownloadsTable(
                                         let status_filter_clone = status_filter.clone();
                                         let get_download_counts_clone = get_download_counts.clone();
                                         view! {
-                                            // All button
                                             <button
-                                                class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_clone.get() == "all" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_clone.get() == "all" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                 style={move || {
                                                     if status_filter_clone.get() == "all" {
-                                                        "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
+                                                        "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                     } else {
-                                                        "background-color: rgba(148, 163, 184, 0.1); color: var(--text-secondary); border: 1.5px solid rgba(148, 163, 184, 0.2);".to_string()
+                                                        "background-color: rgba(148, 163, 184, 0.1); color: var(--text-secondary); border: 1.5px solid rgba(148, 163, 184, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                     }
                                                 }}
                                                 on:click=move |_| status_filter_clone.set("all".to_string())
@@ -2624,7 +3012,6 @@ pub fn DownloadsTable(
                                                 {move || format!("All ({})", get_download_counts_clone().get("total").unwrap_or(&0))}
                                             </button>
                                             
-                                            // Status badges
                                             {
                                                 let status_filter_queued = status_filter.clone();
                                                 let get_download_counts_queued = get_download_counts.clone();
@@ -2632,12 +3019,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || queued_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_queued.get() == "queued" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_queued.get() == "queued" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_queued.get() == "queued" {
-                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2);".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -2661,12 +3048,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || downloading_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_downloading.get() == "downloading" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_downloading.get() == "downloading" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_downloading.get() == "downloading" {
-                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2);".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -2690,12 +3077,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || seeding_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_seeding.get() == "seeding" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_seeding.get() == "seeding" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_seeding.get() == "seeding" {
-                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2);".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -2719,12 +3106,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || cached_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_cached.get() == "cached" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_cached.get() == "cached" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_cached.get() == "cached" {
-                                                                    "background-color: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.4);".to_string()
+                                                                    "background-color: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(34, 197, 94, 0.1); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.2);".to_string()
+                                                                    "background-color: rgba(34, 197, 94, 0.1); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -2742,116 +3129,29 @@ pub fn DownloadsTable(
                                             }
                                             
                                             {
-                                                let status_filter_paused = status_filter.clone();
-                                                let get_download_counts_paused = get_download_counts.clone();
-                                                let paused_count = move || *get_download_counts_paused().get("paused").unwrap_or(&0);
+                                                let status_filter_inactive = status_filter.clone();
+                                                let get_download_counts_inactive = get_download_counts.clone();
+                                                let inactive_count = move || *get_download_counts_inactive().get("inactive").unwrap_or(&0);
                                                 view! {
-                                                    <Show when=move || paused_count() != 0>
+                                                    <Show when=move || inactive_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_paused.get() == "paused" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_inactive.get() == "inactive" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
-                                                                if status_filter_paused.get() == "paused" {
-                                                                    "background-color: rgba(250, 204, 21, 0.2); color: #facc15; border: 1.5px solid rgba(250, 204, 21, 0.4);".to_string()
+                                                                if status_filter_inactive.get() == "inactive" {
+                                                                    "background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(250, 204, 21, 0.1); color: #facc15; border: 1.5px solid rgba(250, 204, 21, 0.2);".to_string()
+                                                                    "background-color: rgba(248, 113, 113, 0.1); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
-                                                                if status_filter_paused.get() == "paused" {
-                                                                    status_filter_paused.set("all".to_string());
+                                                                if status_filter_inactive.get() == "inactive" {
+                                                                    status_filter_inactive.set("all".to_string());
                                                                 } else {
-                                                                    status_filter_paused.set("paused".to_string());
+                                                                    status_filter_inactive.set("inactive".to_string());
                                                                 }
                                                             }
                                                         >
-                                                            {move || format!("Paused ({})", paused_count())}
-                                                        </button>
-                                                    </Show>
-                                                }
-                                            }
-                                            
-                                            {
-                                                let status_filter_stalled = status_filter.clone();
-                                                let get_download_counts_stalled = get_download_counts.clone();
-                                                let stalled_count = move || *get_download_counts_stalled().get("stalled").unwrap_or(&0);
-                                                view! {
-                                                    <Show when=move || stalled_count() != 0>
-                                                        <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_stalled.get() == "stalled" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
-                                                            style={move || {
-                                                                if status_filter_stalled.get() == "stalled" {
-                                                                    "background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.4);".to_string()
-                                                                } else {
-                                                                    "background-color: rgba(248, 113, 113, 0.1); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.2);".to_string()
-                                                                }
-                                                            }}
-                                                            on:click=move |_| {
-                                                                if status_filter_stalled.get() == "stalled" {
-                                                                    status_filter_stalled.set("all".to_string());
-                                                                } else {
-                                                                    status_filter_stalled.set("stalled".to_string());
-                                                                }
-                                                            }
-                                                        >
-                                                            {move || format!("Stalled ({})", stalled_count())}
-                                                        </button>
-                                                    </Show>
-                                                }
-                                            }
-                                            
-                                            {
-                                                let status_filter_error = status_filter.clone();
-                                                let get_download_counts_error = get_download_counts.clone();
-                                                let error_count = move || *get_download_counts_error().get("error").unwrap_or(&0);
-                                                view! {
-                                                    <Show when=move || error_count() != 0>
-                                                        <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_error.get() == "error" || status_filter_error.get() == "failed" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
-                                                            style={move || {
-                                                                if status_filter_error.get() == "error" || status_filter_error.get() == "failed" {
-                                                                    "background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.4);".to_string()
-                                                                } else {
-                                                                    "background-color: rgba(248, 113, 113, 0.1); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.2);".to_string()
-                                                                }
-                                                            }}
-                                                            on:click=move |_| {
-                                                                if status_filter_error.get() == "error" || status_filter_error.get() == "failed" {
-                                                                    status_filter_error.set("all".to_string());
-                                                                } else {
-                                                                    status_filter_error.set("error".to_string());
-                                                                }
-                                                            }
-                                                        >
-                                                            {move || format!("Failed ({})", error_count())}
-                                                        </button>
-                                                    </Show>
-                                                }
-                                            }
-                                            
-                                            {
-                                                let status_filter_expired = status_filter.clone();
-                                                let get_download_counts_expired = get_download_counts.clone();
-                                                let expired_count = move || *get_download_counts_expired().get("expired").unwrap_or(&0);
-                                                view! {
-                                                    <Show when=move || expired_count() != 0>
-                                                        <button
-                                                            class={move || format!("px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_expired.get() == "expired" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
-                                                            style={move || {
-                                                                if status_filter_expired.get() == "expired" {
-                                                                    "background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.4);".to_string()
-                                                                } else {
-                                                                    "background-color: rgba(156, 163, 175, 0.1); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.2);".to_string()
-                                                                }
-                                                            }}
-                                                            on:click=move |_| {
-                                                                if status_filter_expired.get() == "expired" {
-                                                                    status_filter_expired.set("all".to_string());
-                                                                } else {
-                                                                    status_filter_expired.set("expired".to_string());
-                                                                }
-                                                            }
-                                                        >
-                                                            {move || format!("Expired ({})", expired_count())}
+                                                            {move || format!("Inactive ({})", inactive_count())}
                                                         </button>
                                                     </Show>
                                                 }
@@ -2864,11 +3164,9 @@ pub fn DownloadsTable(
                     </div>
                 </div>
                 
-                // Controls Card
                 <div class="flex-shrink-0 lg:w-auto lg:min-w-0">
                     <div class="p-4">
                         <div class="flex items-center justify-center space-x-2">
-                            // Blur Toggle Button
                             <button
                                 class="px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
                                 style="background-color: transparent; border: 1px solid var(--border-secondary);"
@@ -2889,7 +3187,6 @@ pub fn DownloadsTable(
                                 <span style="color: var(--text-primary);">{move || if is_blurred.get() { "Show" } else { "Blur" }}</span>
                             </button>
                             
-                            // Expand/Collapse All Files Button
                             {
                                 let has_files = move || {
                                     downloads.get().iter().any(|d| !d.files.is_empty())
@@ -2926,7 +3223,6 @@ pub fn DownloadsTable(
                                 }
                             }
                             
-                            // Configure Button
                             <button
                                 class="px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
                                 style="background-color: transparent; border: 1px solid var(--border-secondary);"
@@ -2961,7 +3257,6 @@ pub fn DownloadsTable(
             </Show>
 
 
-            // Bulk Actions Bar - Always visible but grayed out when nothing selected
             <div class={move || format!("rounded-lg p-4 mb-4 transition-all duration-200 {}", if show_bulk_actions.get() { "" } else { "opacity-50" })} style={move || format!("background: var(--bg-card); border: 1px solid var(--border-secondary); {}", if show_bulk_actions.get() { "" } else { "opacity: 0.5;" })}>
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-4">
@@ -2984,20 +3279,38 @@ pub fn DownloadsTable(
                     </div>
                     <div class="flex items-center space-x-2">
                         <button
-                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors {}", if show_bulk_actions.get() { "" } else { "cursor-not-allowed" })}
-                            style={move || if show_bulk_actions.get() { "background-color: var(--accent-secondary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                            disabled=move || !show_bulk_actions.get()
-                            on:click=move |_| if show_bulk_actions.get() { handle_bulk_download() }
+                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if show_bulk_actions.get() && !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
+                            style={move || if show_bulk_actions.get() && !bulk_action_loading.get() { "background-color: var(--accent-secondary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
+                            disabled=move || !show_bulk_actions.get() || bulk_action_loading.get()
+                            on:click=move |_| if show_bulk_actions.get() && !bulk_action_loading.get() { handle_bulk_download() }
                         >
+                            <Show when=move || bulk_action_loading.get()>
+                                                <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Accent/>
+                                            </Show>
                             "Download Selected"
                         </button>
                         <button
-                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors {}", if show_bulk_actions.get() { "" } else { "cursor-not-allowed" })}
-                            style={move || if show_bulk_actions.get() { "background-color: var(--accent-danger); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                            disabled=move || !show_bulk_actions.get()
-                            on:click=move |_| if show_bulk_actions.get() { handle_bulk_delete() }
+                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if show_bulk_actions.get() && !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
+                            style={move || if show_bulk_actions.get() && !bulk_action_loading.get() { "background-color: var(--accent-danger); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
+                            disabled=move || !show_bulk_actions.get() || bulk_action_loading.get()
+                            on:click=move |_| if show_bulk_actions.get() && !bulk_action_loading.get() { handle_bulk_delete() }
                         >
+                            <Show when=move || bulk_action_loading.get()>
+                                                <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Danger/>
+                                            </Show>
                             "Delete Selected"
+                        </button>
+                        <button
+                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if show_bulk_actions.get() { "" } else { "cursor-not-allowed" })}
+                            style={move || if show_bulk_actions.get() { "background-color: var(--bg-tertiary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
+                            disabled=move || !show_bulk_actions.get()
+                            on:click=move |_| if show_bulk_actions.get() { handle_bulk_copy_links() }
+                            title="Copy Links"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                            </svg>
+                            "Copy Links"
                         </button>
                         <button
                             class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors {}", if show_bulk_actions.get() { "" } else { "cursor-not-allowed" })}
@@ -3033,7 +3346,6 @@ pub fn DownloadsTable(
                                             on:click=move |_| {
                                                 let current_sort = sort_by.get();
                                                 if current_sort == "name" {
-                                                    // Toggle sort order if clicking same column
                                                     sort_order.set(if sort_order.get() == "asc" { "desc".to_string() } else { "asc".to_string() });
                                                 } else {
                                                     sort_by.set("name".to_string());
@@ -3227,6 +3539,11 @@ pub fn DownloadsTable(
                                                                 <p class={move || format!("text-xs text-slate-400 {}", if is_blurred.get() { "blur-sm select-none" } else { "" })} style={move || if is_blurred.get() { "filter: blur(4px);" } else { "" }}>
                                                                     {format!("ID: {}", download.id)}
                                                                 </p>
+                                                                <Show when=move || action_errors.get().get(&download.id).is_some()>
+                                                                    <div class="mt-1 px-2 py-1 rounded text-xs" style="background-color: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); color: #fca5a5;">
+                                                                        {move || action_errors.get().get(&download.id).cloned().unwrap_or_default()}
+                                                                    </div>
+                                                                </Show>
                                                             </div>
                                                         </div>
                                                     </td>
@@ -3255,7 +3572,6 @@ pub fn DownloadsTable(
                                                     </td>
                                                     <td class="px-6 py-4" style="width: 200px;">
                                                         {
-                                                            // Pre-calculate values for progress display
                                                             let progress_for_bar = download.progress;
                                                             let download_speed_for_display = download.download_speed;
                                                             let upload_speed_for_display = download.upload_speed;
@@ -3289,9 +3605,9 @@ pub fn DownloadsTable(
                                                                             <span style="color: #34D399;">
                                                                                 {
                                                                                     let speed_bytes = download_speed_for_display as f64;
-                                                                                    let speed_tb = speed_bytes / 1_099_511_627_776.0; // 1024^4
-                                                                                    let speed_gb = speed_bytes / 1_073_741_824.0; // 1024^3
-                                                                                    let speed_mb = speed_bytes / 1_048_576.0; // 1024^2
+                                                                                    let speed_tb = speed_bytes / 1_099_511_627_776.0; 
+                                                                                    let speed_gb = speed_bytes / 1_073_741_824.0; 
+                                                                                    let speed_mb = speed_bytes / 1_048_576.0; 
                                                                                     let speed_kb = speed_bytes / 1024.0;
                                                                                     
                                                                                     if speed_tb >= 1.0 {
@@ -3311,9 +3627,9 @@ pub fn DownloadsTable(
                                                                                 {
                                                                                     if upload_speed_for_display > 0i64 {
                                                                                         let speed_bytes = upload_speed_for_display as f64;
-                                                                                        let speed_tb = speed_bytes / 1_099_511_627_776.0; // 1024^4
-                                                                                        let speed_gb = speed_bytes / 1_073_741_824.0; // 1024^3
-                                                                                        let speed_mb = speed_bytes / 1_048_576.0; // 1024^2
+                                                                                        let speed_tb = speed_bytes / 1_099_511_627_776.0; 
+                                                                                        let speed_gb = speed_bytes / 1_073_741_824.0; 
+                                                                                        let speed_mb = speed_bytes / 1_048_576.0; 
                                                                                         let speed_kb = speed_bytes / 1024.0;
                                                                                         
                                                                                         if speed_tb >= 1.0 {
@@ -3368,88 +3684,141 @@ pub fn DownloadsTable(
                                                                             </Show>
                                                                         </div>
                                                                     </Show>
+                                                                    <Show when=move || {
+                                                                        download.download_type == DownloadType::Torrent && (download.ratio.map_or(false, |r| r > 0.0) || download.seeds.is_some() || download.peers.is_some())
+                                                                    }>
+                                                                        <div class="flex justify-center items-center gap-3 text-xs">
+                                                                            <Show when=move || download.ratio.map_or(false, |r| r > 0.0)>
+                                                                                <span style="color: var(--text-muted);">
+                                                                                    {format!("Ratio: {:.2}", download.ratio.unwrap_or(0.0))}
+                                                                                </span>
+                                                                            </Show>
+                                                                            <Show when=move || download.seeds.map_or(false, |s| s >= 0)>
+                                                                                <span style="color: var(--text-muted);">
+                                                                                    {format!("Seeds: {}", download.seeds.unwrap_or(0))}
+                                                                                </span>
+                                                                            </Show>
+                                                                            <Show when=move || download.peers.map_or(false, |p| p >= 0)>
+                                                                                <span style="color: var(--text-muted);">
+                                                                                    {format!("Peers: {}", download.peers.unwrap_or(0))}
+                                                                                </span>
+                                                                            </Show>
+                                                                        </div>
+                                                                    </Show>
                                                                 </div>
                                                             }
                                                         }
                                                     </td>
                                                     <td class="px-6 py-4" style="width: 140px;">
                                                         <div class="actions-container flex space-x-1">
-                                                            // Download Button - clone status once per closure usage
                                                             {
-                                                                let status_class = download.status.clone();
-                                                                let status_style = download.status.clone();
-                                                                let status_disabled = download.status.clone();
-                                                                let status_click = download.status.clone();
-                                                                let status_title = download.status.clone();
-                                                                let status_svg = download.status.clone();
+                                                                let download_button_clone = download_clone.clone();
+                                                                let status_class = download_button_clone.status.clone();
+                                                                let status_style = download_button_clone.status.clone();
+                                                                let status_disabled = download_button_clone.status.clone();
+                                                                let status_click = download_button_clone.status.clone();
+                                                                let status_title = download_button_clone.status.clone();
+                                                                let status_svg_for_style = download_button_clone.status.clone();
+                                                                let action_loading_clone = action_loading.clone();
                                                                 view! {
                                                                     <button
                                                                         class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_download_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
                                                                         style={move || if is_download_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
-                                                                        disabled=move || !is_download_enabled(&status_disabled)
-                                                                        on:click=move |_| if is_download_enabled(&status_click) { handle_download(download_clone.id, download_clone.download_type.clone(), None) }
+                                                                        disabled=move || !is_download_enabled(&status_disabled) || action_loading_clone.get().get(&download_button_clone.id) == Some(&"download".to_string())
+                                                                        on:click=move |_| if is_download_enabled(&status_click) && action_loading_clone.get().get(&download_button_clone.id) != Some(&"download".to_string()) { handle_download(download_button_clone.id, download_button_clone.download_type.clone(), None) }
                                                                         title={move || if is_download_enabled(&status_title) { "Download".to_string() } else { "Download not available for this status".to_string() }}
                                                                     >
-                                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={move || if is_download_enabled(&status_svg) { "color: var(--accent-secondary);" } else { "color: var(--text-muted);" }}>
-                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                                                        </svg>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_button_clone.id) == Some(&"download".to_string())>
+                                                                            <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Accent/>
+                                                                        </Show>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_button_clone.id) != Some(&"download".to_string())>
+                                                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={
+                                                                                let status_str = status_svg_for_style.clone();
+                                                                                move || {
+                                                                                    if is_download_enabled(&status_str) { "color: var(--accent-secondary);" } else { "color: var(--text-muted);" }
+                                                                                }
+                                                                            }>
+                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                                                            </svg>
+                                                                        </Show>
                                                                     </button>
                                                                 }
                                                             }
                                                             
-                                                            // Pause/Resume Button - clone status once per closure usage
                                                             {
                                                                 let status_class = download.status.clone();
                                                                 let status_style = download.status.clone();
                                                                 let status_disabled = download.status.clone();
                                                                 let status_click = download.status.clone();
                                                                 let status_title = download.status.clone();
-                                                                let status_svg = download.status.clone();
+                                                                let status_svg_for_style = download.status.clone();
+                                                                let download_id = pause_resume_clone.id;
+                                                                let action_loading_clone = action_loading.clone();
                                                                 view! {
                                                                     <button
                                                                         class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_pause_resume_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
                                                                         style={move || if is_pause_resume_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
-                                                                        disabled=move || !is_pause_resume_enabled(&status_disabled)
-                                                                        on:click=move |_| if is_pause_resume_enabled(&status_click) { handle_pause_resume(pause_resume_clone.id, pause_resume_clone.download_type.clone(), pause_resume_clone.status.clone()) }
+                                                                        disabled=move || !is_pause_resume_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"stop_resume".to_string())
+                                                                        on:click=move |_| if is_pause_resume_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"stop_resume".to_string()) { handle_stop_resume(pause_resume_clone.id, pause_resume_clone.download_type.clone(), pause_resume_clone.status.clone()) }
                                                                         title={move || if is_pause_resume_enabled(&status_title) { 
                                                                             match status_title.to_lowercase().as_str() {
-                                                                                "downloading" | "active" | "seeding" => "Pause".to_string(),
+                                                                                "downloading" | "active" | "seeding" => "Stop".to_string(),
                                                                                 "paused" | "stopped" | "stalled" => "Resume".to_string(),
-                                                                                _ => "Pause/Resume".to_string(),
+                                                                                _ => "Stop/Resume".to_string(),
                                                                             }
-                                                                        } else { "Pause/Resume not available for this status".to_string() }}
+                                                                        } else { "Stop/Resume not available for this status".to_string() }}
                                                                     >
-                                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={move || if is_pause_resume_enabled(&status_svg) { "color: var(--accent-warning);" } else { "color: var(--text-muted);" }}>
-                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                                                        </svg>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_id) == Some(&"stop_resume".to_string())>
+                                                                            <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Warning/>
+                                                                        </Show>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_id) != Some(&"stop_resume".to_string())>
+                                                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={
+                                                                                let status_str = status_svg_for_style.clone();
+                                                                                move || {
+                                                                                    if is_pause_resume_enabled(&status_str) { "color: var(--accent-warning);" } else { "color: var(--text-muted);" }
+                                                                                }
+                                                                            }>
+                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                            </svg>
+                                                                        </Show> 
                                                                     </button>
                                                                 }
                                                             }
                                                             
-                                                            // Delete Button - clone status once per closure usage
                                                             {
                                                                 let status_class = download.status.clone();
                                                                 let status_style = download.status.clone();
                                                                 let status_disabled = download.status.clone();
                                                                 let status_click = download.status.clone();
                                                                 let status_title = download.status.clone();
-                                                                let status_svg = download.status.clone();
+                                                                let status_svg_for_style = download.status.clone();
+                                                                let download_id = delete_clone.id;
+                                                                let action_loading_clone = action_loading.clone();
                                                                 view! {
                                                                     <button
                                                                         class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_delete_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
                                                                         style={move || if is_delete_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
-                                                                        disabled=move || !is_delete_enabled(&status_disabled)
-                                                                        on:click=move |_| if is_delete_enabled(&status_click) { handle_delete(delete_clone.id, delete_clone.download_type.clone()) }
+                                                                        disabled=move || !is_delete_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"delete".to_string())
+                                                                        on:click=move |_| if is_delete_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"delete".to_string()) { handle_delete(delete_clone.id, delete_clone.download_type.clone()) }
                                                                         title={move || if is_delete_enabled(&status_title) { "Delete".to_string() } else { "Delete not available".to_string() }}
                                                                     >
-                                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={move || if is_delete_enabled(&status_svg) { "color: var(--accent-danger);" } else { "color: var(--text-muted);" }}>
-                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                                                        </svg>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_id) == Some(&"delete".to_string())>
+                                                                            <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Danger/>
+                                                                        </Show>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_id) != Some(&"delete".to_string())>
+                                                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={
+                                                                                let status_str = status_svg_for_style.clone();
+                                                                                move || {
+                                                                                    if is_delete_enabled(&status_str) { "color: var(--accent-danger);" } else { "color: var(--text-muted);" }
+                                                                                }
+                                                                            }>
+                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                                                            </svg>
+                                                                        </Show>
                                                                     </button>
                                                                 }
                                                             }
                                                             
-                                                            // Reannounce Button (for stalled torrents)
                                                             {
                                                                 let reannounce_status = download.status.clone();
                                                                 let reannounce_type = download.download_type;
@@ -3469,23 +3838,24 @@ pub fn DownloadsTable(
                                                                 }
                                                             }
                                                             
-                                                            // Stream Button - clone status once per closure usage
                                                             {
                                                                 let status_class = download.status.clone();
                                                                 let status_style = download.status.clone();
                                                                 let status_disabled = download.status.clone();
                                                                 let status_click = download.status.clone();
                                                                 let status_title = download.status.clone();
-                                                                let status_svg = download.status.clone();
+                                                                let status_svg_for_style = download.status.clone();
+                                                                let download_id = stream_clone.id;
+                                                                let action_loading_clone = action_loading.clone();
                                                                 view! {
                                                                     <button
                                                                         class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_stream_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
                                                                         style={move || if is_stream_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
-                                                                        disabled=move || !is_stream_enabled(&status_disabled)
-                                                                        on:click=move |_| if is_stream_enabled(&status_click) { handle_stream(stream_clone.id, stream_clone.download_type.clone(), None) }
+                                                                        disabled=move || !is_stream_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"stream".to_string())
+                                                                        on:click=move |_| if is_stream_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"stream".to_string()) { handle_stream(stream_clone.id, stream_clone.download_type.clone(), None) }
                                                                         title={move || {
                                                                             if !has_streaming_plan() {
-                                                                                "Streaming requires Plan 2".to_string()
+                                                                                "Streaming requires Pro plan".to_string()
                                                                             } else if is_stream_enabled(&status_title) {
                                                                                 "Stream".to_string()
                                                                             } else {
@@ -3493,14 +3863,23 @@ pub fn DownloadsTable(
                                                                             }
                                                                         }}
                                                                     >
-                                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={move || if is_stream_enabled(&status_svg) { "color: var(--accent-primary);" } else { "color: var(--text-muted);" }}>
-                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                                                                        </svg>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_id) == Some(&"stream".to_string())>
+                                                                            <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Accent/>
+                                                                        </Show>
+                                                                        <Show when=move || action_loading_clone.get().get(&download_id) != Some(&"stream".to_string())>
+                                                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={
+                                                                                let status_str = status_svg_for_style.clone();
+                                                                                move || {
+                                                                                    if is_stream_enabled(&status_str) { "color: var(--accent-primary);" } else { "color: var(--text-muted);" }
+                                                                                }
+                                                                            }>
+                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                                                            </svg>
+                                                                        </Show>
                                                                     </button>
                                                                 }
                                                             }
                                                             
-                                                            // More Options Button (dots menu) - Always on the far right
                                                             <div class="relative inline-block text-left" on:click=move |ev| ev.stop_propagation()>
                                                                 <button
                                                                     class="p-2 rounded transition-colors flex items-center justify-center"
@@ -3515,7 +3894,6 @@ pub fn DownloadsTable(
                                                                 <Show when=move || open_dropdown.get() == Some(download.id)>
                                                                     <div class="absolute z-50 mt-2 w-48 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none" style="background: var(--bg-tertiary); border: 1px solid var(--border-secondary); left: 0; transform: translateX(-100%);" on:click=move |ev| ev.stop_propagation()>
                                                                     <div class="py-1">
-                                                                        // Cloud Upload Options
                                                                         <button
                                                                             class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80"
                                                                             style="color: var(--text-secondary);"
@@ -3554,7 +3932,6 @@ pub fn DownloadsTable(
                                                     </td>
                                                 </tr>
                                                 
-                                                // Files dropdown - Show files for all download types when expanded
                                                 <Show when=move || expanded_file_rows.get().contains(&download_id_for_files) && files_empty_check>
                                                     {
                                                         let download_files_count = files_for_display.len();
@@ -3628,13 +4005,27 @@ pub fn DownloadsTable(
                                                                                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                                                                                                         </svg>
                                                                                                     </button>
+                                                                                                    <button
+                                                                                                        class="p-2 rounded transition-colors flex items-center justify-center"
+                                                                                                        style="background-color: transparent;"
+                                                                                                        on:click=move |_| {
+                                                                                                            let download_id = file_download_clone.id;
+                                                                                                            let download_type = file_download_clone.download_type.clone();
+                                                                                                            let file_id = file_clone.id;
+                                                                                                            handle_copy_link(download_id, download_type, Some(file_id));
+                                                                                                        }
+                                                                                                        title="Copy Download Link"
+                                                                                                    >
+                                                                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-secondary);">
+                                                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                                                                                        </svg>
+                                                                                                    </button>
                                                                                                     {
                                                                                                         let file_check_clone = file_clone.clone();
                                                                                                         let file_stream_clone = file_download_clone.clone();
                                                                                                         let file_stream_file_clone = file_clone.clone();
                                                                                                         view! {
                                                                                                             <Show when=move || {
-                                                                                                                // Only show stream button for video files
                                                                                                                 is_video_file(&file_check_clone) && !file_check_clone.zipped.unwrap_or(false) && !file_check_clone.infected.unwrap_or(false)
                                                                                                             }>
                                                                                                                 <button

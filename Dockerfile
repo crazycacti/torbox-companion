@@ -60,69 +60,28 @@ ENV LEPTOS_ENV=PROD
 ENV RUST_BACKTRACE=1
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "ARM64 detected, disabling wasm-opt" && \
-        if ! grep -qE "^wasm-opt-features\s*=\s*\[\]" Cargo.toml; then \
-            awk '/^\[package\.metadata\.leptos\]/ { \
-                print; \
-                print "wasm-opt-features = []"; \
-                next \
-            } \
-            { print }' Cargo.toml > Cargo.toml.tmp && \
+        echo "ARM64 detected, disabling wasm-opt in Cargo.toml" && \
+        if ! grep -q "^wasm-opt = false" Cargo.toml; then \
+            awk '/^\[package\.metadata\.leptos\]/ { print; print "wasm-opt = false"; next } { print }' Cargo.toml > Cargo.toml.tmp && \
             mv Cargo.toml.tmp Cargo.toml; \
         fi && \
-        if ! grep -qE "^wasm-opt\s*=\s*false" Cargo.toml; then \
-            awk '/^\[package\.metadata\.leptos\]/ { \
-                print; \
-                print "wasm-opt = false"; \
-                next \
-            } \
-            { print }' Cargo.toml > Cargo.toml.tmp && \
-            mv Cargo.toml.tmp Cargo.toml; \
-        fi && \
-        echo "Verifying wasm-opt configuration:" && \
-        grep -E "^wasm-opt" Cargo.toml || echo "No wasm-opt settings found"; \
-    else \
-        echo "TARGETARCH is $TARGETARCH, using wasm-opt optimization"; \
+        echo "Also creating wasm-opt wrapper as fallback" && \
+        mkdir -p ~/.cargo/bin && \
+        printf "#!/bin/sh\nfor arg in \"\\\$@\"; do\n  if [ \"\\\$arg\" = \"-o\" ]; then OUTPUT_NEXT=1\n  elif [ \"\\\$OUTPUT_NEXT\" = \"1\" ]; then OUTPUT=\"\\\$arg\"; OUTPUT_NEXT=0\n  elif [ -z \"\\\$INPUT\" ] && [ -f \"\\\$arg\" ]; then INPUT=\"\\\$arg\"\n  fi\ndone\n[ -n \"\\\$OUTPUT\" ] && [ -n \"\\\$INPUT\" ] && cp \"\\\$INPUT\" \"\\\$OUTPUT\"\nexit 0\n" > ~/.cargo/bin/wasm-opt && \
+        chmod +x ~/.cargo/bin/wasm-opt; \
     fi
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/app/target \
-    sh -c 'if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "Setting up wasm-opt no-op wrapper for ARM64..." && \
-        mkdir -p ~/.cargo/bin && \
-        printf "#!/bin/sh\necho \"wasm-opt skipped on ARM64 (no-op)\"\nif [ -n \"\\\$2\" ] && [ -f \"\\\$1\" ]; then cp \"\\\$1\" \"\\\$2\" 2>/dev/null || true; fi\nexit 0\n" > ~/.cargo/bin/wasm-opt && \
-        chmod +x ~/.cargo/bin/wasm-opt && \
-        export PATH="$HOME/.cargo/bin:$PATH" && \
-        echo "wasm-opt wrapper created, will intercept any binary-install downloads"; \
-    fi && \
-    CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release 2>&1 | tee /tmp/build.log && \
-    if [ "$TARGETARCH" = "arm64" ] && [ -f /tmp/build.log ] && grep -q "wasm-opt.*installed\|wasm-opt.*downloaded" /tmp/build.log; then \
-        echo "wasm-opt was downloaded by binary-install, patching it..." && \
-        find ~/.cargo ~/.cache /root/.cargo /root/.cache -name "wasm-opt*" -type f -executable 2>/dev/null | while read -r wasmopt; do \
-            if [ -f "$wasmopt" ] && file "$wasmopt" 2>/dev/null | grep -qE "ELF|executable"; then \
-                echo "Patching $wasmopt" && \
-                mv "$wasmopt" "${wasmopt}.orig" 2>/dev/null && \
-                printf "#!/bin/sh\necho \"wasm-opt skipped on ARM64\"\nif [ -n \"\\\$2\" ] && [ -f \"\\\$1\" ]; then cp \"\\\$1\" \"\\\$2\" 2>/dev/null || true; fi\nexit 0\n" > "$wasmopt" && \
-                chmod +x "$wasmopt"; \
-            fi \
-        done && \
-        if grep -q "wasm-opt.*failed\|wasm-opt.*error" /tmp/build.log; then \
-            echo "wasm-opt failed, retrying build with patched binary..." && \
-            cargo leptos build --release; \
-        fi; \
-    fi && \
-    echo "Build completed, checking for WASM file..." && \
+    sh -c 'if [ "$TARGETARCH" = "arm64" ]; then export PATH="$HOME/.cargo/bin:$PATH"; fi && \
+    CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release && \
     if [ ! -f target/site/pkg/torbox-companion.wasm ]; then \
-        echo "ERROR: cargo leptos build failed to create torbox-companion.wasm"; \
-        echo "Contents of target/site/pkg:"; \
-        ls -la target/site/pkg/ || echo "Directory does not exist"; \
+        echo "ERROR: WASM file not found"; \
         exit 1; \
     fi && \
-    echo "WASM file found, creating symlink..." && \
     cd target/site/pkg && \
-    ln -sf torbox-companion.wasm torbox-companion_bg.wasm && \
-    echo "Build verification complete"'
+    ln -sf torbox-companion.wasm torbox-companion_bg.wasm'
 
 RUN --mount=type=cache,target=/app/target \
     sh -c 'mkdir -p /app/build-output && \
