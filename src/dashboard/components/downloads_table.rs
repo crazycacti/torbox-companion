@@ -791,6 +791,7 @@ fn normalize_status(status: &str) -> String {
     if status_lower.contains("error") 
         || status_lower == "failed" 
         || status_lower == "missingfiles"
+        || status_lower == "reported missing"
         || status_lower.starts_with("failed") {
         return "Failed".to_string();
     }
@@ -1580,8 +1581,13 @@ pub fn DownloadsTable(
                     return true;
                 }
                 
-                if filter_status == "inactive" && (normalized_lower == "paused" || normalized_lower == "stalled" || normalized_lower == "failed" || normalized_lower == "inactive" || normalized_lower == "unknown") {
-                    return true;
+                if filter_status == "inactive" {
+                    if normalized_lower == "paused" || normalized_lower == "stalled" || normalized_lower == "failed" || normalized_lower == "inactive" || normalized_lower == "unknown" || normalized_lower == "expired" {
+                        return true;
+                    }
+                    if normalized_lower != "completed" && normalized_lower != "cached" && normalized_lower != "downloading" && normalized_lower != "seeding" && normalized_lower != "queued" {
+                        return true;
+                    }
                 }
                 
                 false
