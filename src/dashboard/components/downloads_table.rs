@@ -1496,6 +1496,11 @@ pub fn DownloadsTable(
                     }
                 }
                 
+                let current_downloads_check = downloads_poll.get();
+                let has_network_activity = current_downloads_check.iter()
+                    .any(|item| item.active && (item.download_speed > 0 || item.upload_speed > 0));
+                let poll_interval = if has_network_activity { 5000 } else { 10000 };
+                
                 let promise = Promise::new(&mut |resolve, _| {
                     let window = web_sys::window().unwrap();
                     let closure = wasm_bindgen::closure::Closure::once(move || {
@@ -1503,7 +1508,7 @@ pub fn DownloadsTable(
                     });
                     let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
                         closure.as_ref().unchecked_ref(),
-                        10000,
+                        poll_interval,
                     );
                     closure.forget();
                 });
