@@ -612,6 +612,52 @@ pub fn SearchComponent() -> impl IntoView {
         });
     };
     
+    let handle_copy_hash = move |item: SearchResultItem| {
+        let hash = item.hash();
+        spawn_local(async move {
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(window) = web_sys::window() {
+                    let clipboard = window.navigator().clipboard();
+                    let promise = clipboard.write_text(&hash);
+                    if let Ok(_) = JsFuture::from(promise).await {
+                        web_sys::console::log_1(&"Hash copied to clipboard!".into());
+                    }
+                }
+            }
+        });
+    };
+    
+    let handle_copy_nzb = move |item: SearchResultItem| {
+        spawn_local(async move {
+            #[cfg(target_arch = "wasm32")]
+            {
+                if let Some(nzb) = item.nzb() {
+                    if let Some(window) = web_sys::window() {
+                        let clipboard = window.navigator().clipboard();
+                        let promise = clipboard.write_text(&nzb);
+                        if let Ok(_) = JsFuture::from(promise).await {
+                            web_sys::console::log_1(&"NZB link copied to clipboard!".into());
+                        }
+                    }
+                }
+            }
+        });
+    };
+    
+    let expanded_search_dropdowns = RwSignal::new(std::collections::HashSet::<String>::new());
+    
+    let toggle_search_dropdown = move |item_hash: String| {
+        expanded_search_dropdowns.update(|set| {
+            if set.contains(&item_hash) {
+                set.remove(&item_hash);
+            } else {
+                set.insert(item_hash);
+            }
+        });
+    };
+    
+    
     let sorted_results = move || {
         let mut results = search_results.get();
         let field = sort_field.get();
@@ -1213,27 +1259,104 @@ pub fn SearchComponent() -> impl IntoView {
                                                                                 }.into_any()
                                                                             }
                                                                         }}
-                                                                        {move || {
-                                                                            if has_magnet {
-                                                                                let item_copy_btn = item_copy_for_magnet.clone();
-                                                                                view! {
+                                                                        {
+                                                                            let item_hash_dropdown = item_copy_for_magnet.hash();
+                                                                            let item_for_dropdown = item_copy_for_magnet.clone();
+                                                                            let item_hash_for_toggle = item_hash_dropdown.clone();
+                                                                            let item_copy_hash = item_for_dropdown.clone();
+                                                                            let item_copy_nzb = item_for_dropdown.clone();
+                                                                            let item_copy_magnet_dropdown = item_for_dropdown.clone();
+                                                                            let has_magnet_dropdown = item_for_dropdown.magnet().is_some();
+                                                                            let has_nzb_dropdown = item_for_dropdown.nzb().is_some();
+                                                                            let expanded_dropdowns_clone = expanded_search_dropdowns.clone();
+                                                                            
+                                                                            view! {
+                                                                                <div class="relative inline-block text-left" on:click=|ev| ev.stop_propagation()>
                                                                                     <button
                                                                                         class="p-2 rounded-lg transition-all flex items-center justify-center hover:opacity-80 hover:scale-105"
-                                                                                        style="background-color: transparent; color: var(--accent-secondary);"
-                                                                                        on:click=move |_| {
-                                                                                            handle_copy_magnet_clone(item_copy_btn.clone());
+                                                                                        style="background-color: transparent; color: var(--text-secondary);"
+                                                                                        title="More options"
+                                                                                        on:click={
+                                                                                            let item_hash_toggle = item_hash_for_toggle.clone();
+                                                                                            let expanded_dropdowns_toggle = expanded_search_dropdowns.clone();
+                                                                                            move |_| {
+                                                                                                let item_hash_toggle_clone = item_hash_toggle.clone();
+                                                                                                toggle_search_dropdown(item_hash_toggle_clone)
+                                                                                            }
                                                                                         }
-                                                                                        title="Copy Magnet Link"
                                                                                     >
                                                                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
                                                                                         </svg>
                                                                                     </button>
-                                                                                }.into_any()
-                                                                            } else {
-                                                                                view! {}.into_any()
+                                                                                    <Show when=move || expanded_dropdowns_clone.get().contains(&item_hash_dropdown)>
+                                                                                        <div class="absolute z-50 mt-2 w-48 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none" style="background: var(--bg-tertiary); border: 1px solid var(--border-secondary); left: 0; transform: translateX(-100%);" on:click=|ev| ev.stop_propagation()>
+                                                                                            <div class="py-1">
+                                                                                                <button
+                                                                                                    class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
+                                                                                                    style="color: var(--text-secondary);"
+                                                                                                    on:click={
+                                                                                                        let item_hash_for_close = item_hash_for_toggle.clone();
+                                                                                                        let expanded_dropdowns_close = expanded_search_dropdowns.clone();
+                                                                                                        let item_copy_hash_btn = item_copy_hash.clone();
+                                                                                                        move |_| {
+                                                                                                            handle_copy_hash(item_copy_hash_btn.clone());
+                                                                                                            expanded_dropdowns_close.update(|set| {
+                                                                                                                set.remove(&item_hash_for_close);
+                                                                                                            });
+                                                                                                        }
+                                                                                                    }
+                                                                                                >
+                                                                                                    "Copy Hash"
+                                                                                                </button>
+                                                                                                {if has_magnet_dropdown {
+                                                                    let item_copy_magnet_btn = item_copy_magnet_dropdown.clone();
+                                                                    let item_hash_for_close_magnet = item_hash_for_toggle.clone();
+                                                                    let expanded_dropdowns_close_magnet = expanded_search_dropdowns.clone();
+                                                                    view! {
+                                                                        <button
+                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
+                                                                            style="color: var(--text-secondary);"
+                                                                            on:click=move |_| {
+                                                                                handle_copy_magnet_clone(item_copy_magnet_btn.clone());
+                                                                                expanded_dropdowns_close_magnet.update(|set| {
+                                                                                    set.remove(&item_hash_for_close_magnet);
+                                                                                });
                                                                             }
-                                                                        }}
+                                                                        >
+                                                                            "Copy Magnet Link"
+                                                                        </button>
+                                                                    }.into_any()
+                                                                } else {
+                                                                    view! {}.into_any()
+                                                                }}
+                                                                {if has_nzb_dropdown {
+                                                                    let item_copy_nzb_btn = item_copy_nzb.clone();
+                                                                    let item_hash_for_close_nzb = item_hash_for_toggle.clone();
+                                                                    let expanded_dropdowns_close_nzb = expanded_search_dropdowns.clone();
+                                                                    view! {
+                                                                        <button
+                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
+                                                                            style="color: var(--text-secondary);"
+                                                                            on:click=move |_| {
+                                                                                handle_copy_nzb(item_copy_nzb_btn.clone());
+                                                                                expanded_dropdowns_close_nzb.update(|set| {
+                                                                                    set.remove(&item_hash_for_close_nzb);
+                                                                                });
+                                                                            }
+                                                                        >
+                                                                            "Copy NZB Link"
+                                                                        </button>
+                                                                    }.into_any()
+                                                                } else {
+                                                                    view! {}.into_any()
+                                                                }}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </Show>
+                                                                                </div>
+                                                                            }.into_any()
+                                                                        }
                                                                     </div>
                                                                 </td>
                                                             </tr>

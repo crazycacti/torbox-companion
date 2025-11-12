@@ -39,7 +39,8 @@ pub struct DownloadItem {
     pub magnet: Option<String>, 
     pub source_url: Option<String>, 
     pub seeds: Option<i32>, 
-    pub peers: Option<i32>, 
+    pub peers: Option<i32>,
+    pub hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -368,6 +369,7 @@ impl From<Torrent> for DownloadItem {
             source_url: None,
             seeds: Some(torrent.seeds),
             peers: Some(torrent.peers),
+            hash: Some(torrent.hash),
         }
     }
 }
@@ -445,7 +447,8 @@ impl From<WebDownload> for DownloadItem {
             magnet: None, 
             source_url: Some(web_dl.url),
             seeds: None, 
-            peers: None, 
+            peers: None,
+            hash: None,
         }
     }
 }
@@ -577,7 +580,8 @@ impl From<UsenetDownload> for DownloadItem {
             magnet: None, 
             source_url: usenet.original_url,
             seeds: None, 
-            peers: None, 
+            peers: None,
+            hash: Some(usenet.hash),
         }
     }
 }
@@ -893,7 +897,9 @@ pub fn DownloadsTable(
     let show_bulk_actions = RwSignal::new(false);
     
     let action_loading = RwSignal::new(std::collections::HashMap::<i32, String>::new()); 
-    let bulk_action_loading = RwSignal::new(false);
+    let bulk_download_loading = RwSignal::new(false);
+    let bulk_delete_loading = RwSignal::new(false);
+    let bulk_copy_loading = RwSignal::new(false);
     let action_errors = RwSignal::new(std::collections::HashMap::<i32, String>::new()); 
     
     let open_dropdown = RwSignal::new(Option::<i32>::None);
@@ -2200,7 +2206,7 @@ pub fn DownloadsTable(
     };
 
     let handle_bulk_download = {
-        let bulk_action_loading_clone = bulk_action_loading.clone();
+        let bulk_download_loading_clone = bulk_download_loading.clone();
         move || {
             let state = selection_state.get();
             let selected_items = state.selected_items;
@@ -2208,8 +2214,8 @@ pub fn DownloadsTable(
             
             #[cfg(target_arch = "wasm32")]
             {
-                let bulk_action_loading_local = bulk_action_loading_clone.clone();
-                bulk_action_loading_local.set(true);
+                let bulk_download_loading_local = bulk_download_loading_clone.clone();
+                bulk_download_loading_local.set(true);
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
@@ -2331,7 +2337,7 @@ pub fn DownloadsTable(
                         }
                     }
                     }
-                    bulk_action_loading_local.set(false);
+                    bulk_download_loading_local.set(false);
                 });
             }
         }
@@ -2432,12 +2438,15 @@ pub fn DownloadsTable(
 
     let handle_bulk_copy_links = {
         let downloads_clone = downloads.clone();
+        let bulk_copy_loading_clone = bulk_copy_loading.clone();
         move || {
             let state = selection_state.get();
             let selected_items = state.selected_items;
             
             #[cfg(target_arch = "wasm32")]
             {
+                let bulk_copy_loading_local = bulk_copy_loading_clone.clone();
+                bulk_copy_loading_local.set(true);
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
                         let downloads_list = downloads_clone.get();
@@ -2467,15 +2476,15 @@ pub fn DownloadsTable(
                             }
                         }
                     }
+                    bulk_copy_loading_local.set(false);
                 });
             }
         }
     };
 
     let handle_bulk_delete = {
-        let fetch_downloads_clone = fetch_downloads.clone();
         let clear_selection_clone = clear_selection.clone();
-        let bulk_action_loading_clone = bulk_action_loading.clone();
+        let bulk_delete_loading_clone = bulk_delete_loading.clone();
         move || {
             let state = selection_state.get();
             let selected_items = state.selected_items.clone();
@@ -2483,8 +2492,8 @@ pub fn DownloadsTable(
         
         #[cfg(target_arch = "wasm32")]
         {
-            let bulk_action_loading_local = bulk_action_loading_clone.clone();
-            bulk_action_loading_local.set(true);
+            let bulk_delete_loading_local = bulk_delete_loading_clone.clone();
+            bulk_delete_loading_local.set(true);
             spawn_local(async move {
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
@@ -2506,11 +2515,13 @@ pub fn DownloadsTable(
                                 
                                 let mut success_count = 0;
                                 let mut error_count = 0;
+                                let mut deleted_items: Vec<(i32, DownloadType)> = Vec::new();
                                 
                                 for chunk in items.chunks(CONCURRENT_DELETES) {
                                     let futures: Vec<_> = chunk.iter().map(|(item_id, download_type)| {
                                         let api_key = api_key.clone();
                                         let client = client.clone();
+                                        let download_type_clone = download_type.clone();
                                         
                                         async move {
                                             let result = match download_type {
@@ -2535,7 +2546,7 @@ pub fn DownloadsTable(
                                                         },
                                                         item_id
                                                     );
-                                                    Ok(*item_id)
+                                                    Ok((*item_id, download_type_clone))
                                                 }
                                                 Err(e) => {
                                                     log!("Failed to delete {} {}: {:?}", 
@@ -2547,7 +2558,7 @@ pub fn DownloadsTable(
                                                         item_id,
                                                         e
                                                     );
-                                                    Err(*item_id)
+                                                    Err((*item_id, download_type_clone))
                                                 }
                                             }
                                         }
@@ -2556,8 +2567,13 @@ pub fn DownloadsTable(
                                     let results = futures::future::join_all(futures).await;
                                     for result in results {
                                         match result {
-                                            Ok(_) => success_count += 1,
-                                            Err(_) => error_count += 1,
+                                            Ok((id, dt)) => {
+                                                success_count += 1;
+                                                deleted_items.push((id, dt));
+                                            }
+                                            Err((_id, _dt)) => {
+                                                error_count += 1;
+                                            }
                                         }
                                     }
                                     
@@ -2580,9 +2596,18 @@ pub fn DownloadsTable(
                                 
                                 log!("Bulk delete completed: {} succeeded, {} failed", success_count, error_count);
                                 
-                                fetch_downloads_clone();
+                                if !deleted_items.is_empty() {
+                                    downloads_clone.update(|downloads| {
+                                        downloads.retain(|item| {
+                                            !deleted_items.iter().any(|(id, dt)| {
+                                                item.id == *id && item.download_type == *dt
+                                            })
+                                        });
+                                    });
+                                }
+                                
                                 clear_selection_clone();
-                                bulk_action_loading_local.set(false);
+                                bulk_delete_loading_local.set(false);
                             }
                         }
                     }
@@ -3399,36 +3424,60 @@ pub fn DownloadsTable(
                         </div>
                         <div class="flex items-center space-x-2">
                             <button
-                                class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
-                                style={move || if !bulk_action_loading.get() { "background-color: var(--accent-secondary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                                disabled=move || bulk_action_loading.get()
-                                on:click=move |_| if !bulk_action_loading.get() { handle_bulk_download() }
+                                class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { "" } else { "cursor-not-allowed" })}
+                                style=move || {
+                                    if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() {
+                                        "background-color: var(--accent-secondary); color: var(--text-primary);"
+                                    } else {
+                                        "background-color: var(--bg-tertiary); color: var(--text-muted);"
+                                    }
+                                }
+                                disabled=move || bulk_download_loading.get() || bulk_delete_loading.get() || bulk_copy_loading.get()
+                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_download() }
                             >
-                                <Show when=move || bulk_action_loading.get()>
+                                <Show when=move || bulk_download_loading.get()>
                                     <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Accent/>
                                 </Show>
                                 "Download Selected"
                             </button>
                             <button
-                                class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
-                                style={move || if !bulk_action_loading.get() { "background-color: var(--accent-danger); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                                disabled=move || bulk_action_loading.get()
-                                on:click=move |_| if !bulk_action_loading.get() { handle_bulk_delete() }
+                                class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { "" } else { "cursor-not-allowed" })}
+                                style=move || {
+                                    if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() {
+                                        "background-color: var(--accent-danger); color: var(--text-primary);"
+                                    } else {
+                                        "background-color: var(--bg-tertiary); color: var(--text-muted);"
+                                    }
+                                }
+                                disabled=move || bulk_download_loading.get() || bulk_delete_loading.get() || bulk_copy_loading.get()
+                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_delete() }
                             >
-                                <Show when=move || bulk_action_loading.get()>
+                                <Show when=move || bulk_delete_loading.get()>
                                     <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Danger/>
                                 </Show>
                                 "Delete Selected"
                             </button>
                             <button
-                                class="px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2"
-                                style="background-color: var(--bg-tertiary); color: var(--text-primary);"
-                                on:click=move |_| handle_bulk_copy_links()
+                                class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { "" } else { "cursor-not-allowed" })}
+                                style=move || {
+                                    if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() {
+                                        "background-color: var(--bg-tertiary); color: var(--text-primary);"
+                                    } else {
+                                        "background-color: var(--bg-tertiary); color: var(--text-muted);"
+                                    }
+                                }
+                                disabled=move || bulk_download_loading.get() || bulk_delete_loading.get() || bulk_copy_loading.get()
+                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_copy_links() }
                                 title="Copy Links"
                             >
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                                </svg>
+                                <Show when=move || bulk_copy_loading.get()>
+                                    <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Default/>
+                                </Show>
+                                <Show when=move || !bulk_copy_loading.get()>
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                    </svg>
+                                </Show>
                                 "Copy Links"
                             </button>
                             <button
@@ -4012,7 +4061,7 @@ pub fn DownloadsTable(
                                                                 }
                                                             }
                                                             
-                                                            <div class="relative inline-block text-left" on:click=move |ev| ev.stop_propagation()>
+                                                            <div class="relative inline-block text-left" on:click=|ev| ev.stop_propagation()>
                                                                 <button
                                                                     class="p-2 rounded transition-colors flex items-center justify-center"
                                                                     style="background-color: transparent;"
@@ -4024,34 +4073,154 @@ pub fn DownloadsTable(
                                                                     </svg>
                                                                 </button>
                                                                 <Show when=move || open_dropdown.get() == Some(download.id)>
-                                                                    <div class="absolute z-50 mt-2 w-48 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none" style="background: var(--bg-tertiary); border: 1px solid var(--border-secondary); left: 0; transform: translateX(-100%);" on:click=move |ev| ev.stop_propagation()>
+                                                                    <div class="absolute z-50 mt-2 w-48 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none" style="background: var(--bg-tertiary); border: 1px solid var(--border-secondary); left: 0; transform: translateX(-100%);" on:click=|ev| ev.stop_propagation()>
                                                                     <div class="py-1">
                                                                         <button
-                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80"
+                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
                                                                             style="color: var(--text-secondary);"
-                                                                            on:click=move |_| {
-                                                                                handle_cloud_upload(cloud_upload_clone.id, cloud_upload_clone.download_type.clone(), "google".to_string());
-                                                                                close_dropdown();
+                                                                            on:click={
+                                                                                let download_id_copy = cloud_upload_clone.id;
+                                                                                let open_dropdown_close = open_dropdown.clone();
+                                                                                move |_| {
+                                                                                    let download_id_str = download_id_copy.to_string();
+                                                                                    spawn_local(async move {
+                                                                                        #[cfg(target_arch = "wasm32")]
+                                                                                        {
+                                                                                            if let Some(window) = web_sys::window() {
+                                                                                                let clipboard = window.navigator().clipboard();
+                                                                                                let promise = clipboard.write_text(&download_id_str);
+                                                                                                use wasm_bindgen_futures::JsFuture;
+                                                                                                if let Ok(_) = JsFuture::from(promise).await {
+                                                                                                    log!("ID copied to clipboard");
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                    open_dropdown_close.set(None);
+                                                                                }
+                                                                            }
+                                                                        >
+                                                                            "Copy ID"
+                                                                        </button>
+                                                                        {if cloud_upload_clone.hash.is_some() {
+                                                                            let hash_to_copy = cloud_upload_clone.hash.clone().unwrap();
+                                                                            let open_dropdown_close_hash = open_dropdown.clone();
+                                                                            view! {
+                                                                                <button
+                                                                                    class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
+                                                                                    style="color: var(--text-secondary);"
+                                                                                    on:click={
+                                                                                        let hash_to_copy_clone = hash_to_copy.clone();
+                                                                                        move |_| {
+                                                                                            let hash_value = hash_to_copy_clone.clone();
+                                                                                            spawn_local(async move {
+                                                                                                #[cfg(target_arch = "wasm32")]
+                                                                                                {
+                                                                                                    if let Some(window) = web_sys::window() {
+                                                                                                        let clipboard = window.navigator().clipboard();
+                                                                                                        let promise = clipboard.write_text(&hash_value);
+                                                                                                        use wasm_bindgen_futures::JsFuture;
+                                                                                                        if let Ok(_) = JsFuture::from(promise).await {
+                                                                                                            log!("Hash copied to clipboard");
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            });
+                                                                                            open_dropdown_close_hash.set(None);
+                                                                                        }
+                                                                                    }
+                                                                                >
+                                                                                    "Copy Hash"
+                                                                                </button>
+                                                                            }.into_any()
+                                                                        } else {
+                                                                            view! {}.into_any()
+                                                                        }}
+                                                                        {if cloud_upload_clone.download_type == DownloadType::Torrent {
+                                                                            let download_id_export = cloud_upload_clone.id;
+                                                                            let open_dropdown_close_export = open_dropdown.clone();
+                                                                            view! {
+                                                                                <button
+                                                                                    class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
+                                                                                    style="color: var(--text-secondary);"
+                                                                                    on:click=move |_| {
+                                                                                        spawn_local(async move {
+                                                                                            #[cfg(target_arch = "wasm32")]
+                                                                                            {
+                                                                                                if let Some(window) = web_sys::window() {
+                                                                                                    if let Ok(Some(storage)) = window.local_storage() {
+                                                                                                        if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                                                                                            if !api_key.is_empty() {
+                                                                                                                let client = TorboxClient::new(api_key);
+                                                                                                                match client.export_torrent_data(download_id_export, "magnet".to_string()).await {
+                                                                                                                    Ok(response) => {
+                                                                                                                        if let Some(magnet) = response.data {
+                                                                                                                            let clipboard = window.navigator().clipboard();
+                                                                                                                            let promise = clipboard.write_text(&magnet);
+                                                                                                                            use wasm_bindgen_futures::JsFuture;
+                                                                                                                            if let Ok(_) = JsFuture::from(promise).await {
+                                                                                                                                log!("Magnet link exported and copied to clipboard");
+                                                                                                                            }
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                    Err(e) => {
+                                                                                                                        log!("Failed to export torrent: {:?}", e);
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        });
+                                                                                        open_dropdown_close_export.set(None);
+                                                                                    }
+                                                                                >
+                                                                                    "Export Magnet"
+                                                                                </button>
+                                                                            }.into_any()
+                                                                        } else {
+                                                                            view! {}.into_any()
+                                                                        }}
+                                                                        <div class="border-t my-1" style="border-color: var(--border-secondary);"></div>
+                                                                        <button
+                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
+                                                                            style="color: var(--text-secondary);"
+                                                                            on:click={
+                                                                                let cloud_upload_google = cloud_upload_clone.clone();
+                                                                                let open_dropdown_close_google = open_dropdown.clone();
+                                                                                move |_| {
+                                                                                    handle_cloud_upload(cloud_upload_google.id, cloud_upload_google.download_type.clone(), "google".to_string());
+                                                                                    open_dropdown_close_google.set(None);
+                                                                                }
                                                                             }
                                                                         >
                                                                             "Google Drive"
                                                                         </button>
                                                                         <button
-                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80"
+                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
                                                                             style="color: var(--text-secondary);"
-                                                                            on:click=move |_| {
-                                                                                handle_cloud_upload(cloud_upload_clone.id, cloud_upload_clone.download_type.clone(), "dropbox".to_string());
-                                                                                close_dropdown();
+                                                                            on:click={
+                                                                                let cloud_upload_dropbox = cloud_upload_clone.clone();
+                                                                                let open_dropdown_close_dropbox = open_dropdown.clone();
+                                                                                move |_| {
+                                                                                    handle_cloud_upload(cloud_upload_dropbox.id, cloud_upload_dropbox.download_type.clone(), "dropbox".to_string());
+                                                                                    open_dropdown_close_dropbox.set(None);
+                                                                                }
                                                                             }
                                                                         >
                                                                             "Dropbox"
                                                                         </button>
                                                                         <button
-                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80"
+                                                                            class="block w-full px-4 py-2 text-sm transition-colors hover:opacity-80 text-left"
                                                                             style="color: var(--text-secondary);"
-                                                                            on:click=move |_| {
-                                                                                handle_cloud_upload(cloud_upload_clone.id, cloud_upload_clone.download_type.clone(), "onedrive".to_string());
-                                                                                close_dropdown();
+                                                                            on:click={
+                                                                                let cloud_upload_onedrive = cloud_upload_clone.clone();
+                                                                                let open_dropdown_close_onedrive = open_dropdown.clone();
+                                                                                move |_| {
+                                                                                    handle_cloud_upload(cloud_upload_onedrive.id, cloud_upload_onedrive.download_type.clone(), "onedrive".to_string());
+                                                                                    open_dropdown_close_onedrive.set(None);
+                                                                                }
                                                                             }
                                                                         >
                                                                             "OneDrive"
