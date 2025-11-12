@@ -1311,7 +1311,7 @@ pub fn DownloadsTable(
                 });
                 let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
                     closure.as_ref().unchecked_ref(),
-                    2000,
+                    10000,
                 );
                 closure.forget();
             });
