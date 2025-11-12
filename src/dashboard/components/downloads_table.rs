@@ -270,7 +270,7 @@ impl From<Torrent> for DownloadItem {
             Some(&torrent.updated_at),
         );
         
-        let status_lower_final = final_status.to_lowercase();
+        let mut status_lower_final = final_status.to_lowercase();
         
         if (status_lower_final.contains("uploading") || status_lower_final.contains("seeding")) 
             && !torrent.active 
@@ -280,10 +280,12 @@ impl From<Torrent> for DownloadItem {
             } else {
                 "completed".to_string()
             };
+            status_lower_final = final_status.to_lowercase();
         }
         
         if status_lower_final.contains("stalled") && !torrent.active && !torrent.download_finished {
             final_status = "inactive".to_string();
+            status_lower_final = final_status.to_lowercase();
         }
         
         let mut is_expired = false;
@@ -299,12 +301,11 @@ impl From<Torrent> for DownloadItem {
                         } else {
                             "completed".to_string()
                         };
+                        status_lower_final = final_status.to_lowercase();
                     }
                 }
             }
         }
-        
-        let status_lower_final = final_status.to_lowercase();
         
         if status_lower_final == "expired" {
             if torrent.download_finished {
@@ -316,12 +317,12 @@ impl From<Torrent> for DownloadItem {
             } else {
                 final_status = "inactive".to_string();
             }
+            status_lower_final = final_status.to_lowercase();
         }
-        
-        let status_lower_final = final_status.to_lowercase();
         
         if is_expired && !torrent.download_finished {
             final_status = "inactive".to_string();
+            status_lower_final = final_status.to_lowercase();
         } else if !torrent.active && !torrent.download_finished 
             && final_status != "expired" 
             && !status_lower_final.contains("cached") 
@@ -417,7 +418,10 @@ impl From<WebDownload> for DownloadItem {
             progress: web_dl.progress,
             download_speed: 0, 
             upload_speed: 0,
-            active: web_dl.status.to_lowercase() == "downloading" || web_dl.status.to_lowercase() == "active",
+            active: {
+                let status_lower = web_dl.status.to_lowercase();
+                status_lower == "downloading" || status_lower == "active"
+            },
             files: web_dl.files.into_iter().map(|f| DownloadFile {
                 id: f.id,
                 name: f.name,
@@ -482,7 +486,7 @@ impl From<UsenetDownload> for DownloadItem {
             Some(&usenet.updated_at),
         );
         
-        let status_lower_final = final_status.to_lowercase();
+        let mut status_lower_final = final_status.to_lowercase();
         
         if (status_lower_final.contains("uploading") || status_lower_final.contains("seeding")) 
             && !usenet.active 
@@ -492,6 +496,7 @@ impl From<UsenetDownload> for DownloadItem {
             } else {
                 "completed".to_string()
             };
+            status_lower_final = final_status.to_lowercase();
         }
         
         let mut is_expired = false;
@@ -507,12 +512,11 @@ impl From<UsenetDownload> for DownloadItem {
                         } else {
                             "completed".to_string()
                         };
+                        status_lower_final = final_status.to_lowercase();
                     }
                 }
             }
         }
-        
-        let status_lower_final = final_status.to_lowercase();
         
         if status_lower_final == "expired" {
             if usenet.download_finished {
@@ -524,12 +528,12 @@ impl From<UsenetDownload> for DownloadItem {
             } else {
                 final_status = "inactive".to_string();
             }
+            status_lower_final = final_status.to_lowercase();
         }
-        
-        let status_lower_final = final_status.to_lowercase();
         
         if is_expired && !usenet.download_finished {
             final_status = "inactive".to_string();
+            status_lower_final = final_status.to_lowercase();
         } else if !usenet.active && !usenet.download_finished 
             && final_status != "expired" 
             && !status_lower_final.contains("cached") 
@@ -899,6 +903,15 @@ pub fn DownloadsTable(
     let sort_by = RwSignal::new("date".to_string());
     let sort_order = RwSignal::new("desc".to_string());
     
+    let status_cache = Memo::new(move |_| {
+        let downloads = downloads.get();
+        downloads.iter().map(|download| {
+            let normalized = normalize_status(&download.status);
+            let priority = get_status_priority(&download.status);
+            (download.id, (normalized, priority))
+        }).collect::<std::collections::HashMap<i32, (String, u8)>>()
+    });
+    
     let fetch_user_data_if_needed = {
         let user_data = user_data.clone();
         let user_loading = user_loading.clone();
@@ -1019,8 +1032,7 @@ pub fn DownloadsTable(
                                     queued_webdl_future
                                 );
                                 
-                                const UPDATE_THRESHOLD: usize = 20;
-                                const MICROTASK_YIELD: usize = 3;
+                                const PROCESSING_YIELD: usize = 100;
                                 let mut total_processed = 0;
                                 
                                 match torrents_result {
@@ -1030,11 +1042,8 @@ pub fn DownloadsTable(
                                                 all_downloads.push(DownloadItem::from(torrent));
                                                 total_processed += 1;
                                                 
-                                                if total_processed % UPDATE_THRESHOLD == 0 {
-                                                    downloads_clone.set(all_downloads.clone());
+                                                if total_processed % PROCESSING_YIELD == 0 {
                                                     yield_to_browser().await;
-                                                } else if total_processed % MICROTASK_YIELD == 0 {
-                                                    yield_microtask().await;
                                                 }
                                             }
                                         }
@@ -1054,11 +1063,8 @@ pub fn DownloadsTable(
                                                 all_downloads.push(DownloadItem::from(web_dl));
                                                 total_processed += 1;
                                                 
-                                                if total_processed % UPDATE_THRESHOLD == 0 {
-                                                    downloads_clone.set(all_downloads.clone());
+                                                if total_processed % PROCESSING_YIELD == 0 {
                                                     yield_to_browser().await;
-                                                } else if total_processed % MICROTASK_YIELD == 0 {
-                                                    yield_microtask().await;
                                                 }
                                             }
                                         }
@@ -1078,11 +1084,8 @@ pub fn DownloadsTable(
                                                 all_downloads.push(DownloadItem::from(usenet));
                                                 total_processed += 1;
                                                 
-                                                if total_processed % UPDATE_THRESHOLD == 0 {
-                                                    downloads_clone.set(all_downloads.clone());
+                                                if total_processed % PROCESSING_YIELD == 0 {
                                                     yield_to_browser().await;
-                                                } else if total_processed % MICROTASK_YIELD == 0 {
-                                                    yield_microtask().await;
                                                 }
                                             }
                                         }
@@ -1113,11 +1116,8 @@ pub fn DownloadsTable(
                                                         torrent.download_state = "queued".to_string();
                                                         all_downloads.push(DownloadItem::from(torrent));
                                                         total_processed += 1;
-                                                        if total_processed % UPDATE_THRESHOLD == 0 {
-                                                            downloads_clone.set(all_downloads.clone());
+                                                        if total_processed % PROCESSING_YIELD == 0 {
                                                             yield_to_browser().await;
-                                                        } else if total_processed % MICROTASK_YIELD == 0 {
-                                                            yield_microtask().await;
                                                         }
                                                     }
                                                 }
@@ -1149,11 +1149,8 @@ pub fn DownloadsTable(
                                                         usenet.download_state = "queued".to_string();
                                                         all_downloads.push(DownloadItem::from(usenet));
                                                         total_processed += 1;
-                                                        if total_processed % UPDATE_THRESHOLD == 0 {
-                                                            downloads_clone.set(all_downloads.clone());
+                                                        if total_processed % PROCESSING_YIELD == 0 {
                                                             yield_to_browser().await;
-                                                        } else if total_processed % MICROTASK_YIELD == 0 {
-                                                            yield_microtask().await;
                                                         }
                                                     }
                                                 }
@@ -1185,11 +1182,8 @@ pub fn DownloadsTable(
                                                         web_dl.status = "queued".to_string();
                                                         all_downloads.push(DownloadItem::from(web_dl));
                                                         total_processed += 1;
-                                                        if total_processed % UPDATE_THRESHOLD == 0 {
-                                                            downloads_clone.set(all_downloads.clone());
+                                                        if total_processed % PROCESSING_YIELD == 0 {
                                                             yield_to_browser().await;
-                                                        } else if total_processed % MICROTASK_YIELD == 0 {
-                                                            yield_microtask().await;
                                                         }
                                                     }
                                                 }
@@ -1227,7 +1221,6 @@ pub fn DownloadsTable(
                                     downloads_clone.set(all_downloads);
                                     loading_clone.set(false);
                                     
-                                    yield_to_browser().await;
                                     yield_to_browser().await;
                                     yield_microtask().await;
                                     
@@ -1324,12 +1317,6 @@ pub fn DownloadsTable(
                             if !api_key.is_empty() {
                                 let api_key_clone = api_key.clone();
                                 let client = TorboxClient::new(api_key_clone);
-                                let current_downloads = downloads_poll.get();
-                                
-                                let mut current_map: std::collections::HashMap<(i32, DownloadType), usize> = std::collections::HashMap::new();
-                                for (idx, item) in current_downloads.iter().enumerate() {
-                                    current_map.insert((item.id, item.download_type.clone()), idx);
-                                }
                                 
                                 let torrents_future = client.get_torrent_list(None, Some(false), None, None);
                                 let web_downloads_future = client.get_web_download_list(None, Some(false), None, None);
@@ -1348,158 +1335,159 @@ pub fn DownloadsTable(
                                     queued_webdl_future
                                 );
                                 
-                                let mut updated_downloads = current_downloads.clone();
-                                let mut seen_ids: std::collections::HashSet<(i32, DownloadType)> = std::collections::HashSet::new();
+                                downloads_poll.update(|downloads| {
+                                    let mut current_map: std::collections::HashMap<(i32, DownloadType), usize> = std::collections::HashMap::new();
+                                    for (idx, item) in downloads.iter().enumerate() {
+                                        current_map.insert((item.id, item.download_type.clone()), idx);
+                                    }
+                                    
+                                    let mut seen_ids: std::collections::HashSet<(i32, DownloadType)> = std::collections::HashSet::new();
                                 
-                                if let Ok(response) = torrents_result {
-                                    if let Some(data) = response.data {
-                                        for torrent in data {
-                                            let item = DownloadItem::from(torrent);
-                                            let key = (item.id, item.download_type.clone());
-                                            seen_ids.insert(key.clone());
-                                            
-                                            if let Some(&idx) = current_map.get(&key) {
-                                                updated_downloads[idx] = item;
-                                            } else {
-                                                updated_downloads.push(item);
+                                    if let Ok(response) = torrents_result {
+                                        if let Some(data) = response.data {
+                                            for torrent in data {
+                                                let item = DownloadItem::from(torrent);
+                                                let key = (item.id, item.download_type.clone());
+                                                seen_ids.insert(key.clone());
+                                                
+                                                if let Some(&idx) = current_map.get(&key) {
+                                                    downloads[idx] = item;
+                                                } else {
+                                                    downloads.push(item);
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                
-                                if let Ok(response) = web_result {
-                                    if let Some(data) = response.data {
-                                        for web_dl in data {
-                                            let item = DownloadItem::from(web_dl);
-                                            let key = (item.id, item.download_type.clone());
-                                            seen_ids.insert(key.clone());
-                                            
-                                            if let Some(&idx) = current_map.get(&key) {
-                                                updated_downloads[idx] = item;
-                                            } else {
-                                                updated_downloads.push(item);
+                                    
+                                    if let Ok(response) = web_result {
+                                        if let Some(data) = response.data {
+                                            for web_dl in data {
+                                                let item = DownloadItem::from(web_dl);
+                                                let key = (item.id, item.download_type.clone());
+                                                seen_ids.insert(key.clone());
+                                                
+                                                if let Some(&idx) = current_map.get(&key) {
+                                                    downloads[idx] = item;
+                                                } else {
+                                                    downloads.push(item);
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                
-                                if let Ok(response) = usenet_result {
-                                    if let Some(data) = response.data {
-                                        for usenet in data {
-                                            let item = DownloadItem::from(usenet);
-                                            let key = (item.id, item.download_type.clone());
-                                            seen_ids.insert(key.clone());
-                                            
-                                            if let Some(&idx) = current_map.get(&key) {
-                                                updated_downloads[idx] = item;
-                                            } else {
-                                                updated_downloads.push(item);
+                                    
+                                    if let Ok(response) = usenet_result {
+                                        if let Some(data) = response.data {
+                                            for usenet in data {
+                                                let item = DownloadItem::from(usenet);
+                                                let key = (item.id, item.download_type.clone());
+                                                seen_ids.insert(key.clone());
+                                                
+                                                if let Some(&idx) = current_map.get(&key) {
+                                                    downloads[idx] = item;
+                                                } else {
+                                                    downloads.push(item);
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                
-                                if let Ok(response) = queued_torrents_result {
-                                    if let Some(data) = response.data {
-                                        let torrents_array = if let Some(arr) = data.as_array() {
-                                            Some(arr.clone())
-                                        } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
-                                            queued_data.get("torrents").and_then(|v| v.as_array()).cloned()
-                                        } else {
-                                            None
-                                        };
-                                        
-                                        if let Some(torrents_array) = torrents_array {
-                                            for item in torrents_array {
-                                                if let Ok(mut torrent) = serde_json::from_value::<Torrent>(item.clone()) {
-                                                    torrent.download_state = "queued".to_string();
-                                                    let item = DownloadItem::from(torrent);
-                                                    let key = (item.id, item.download_type.clone());
-                                                    seen_ids.insert(key.clone());
-                                                    
-                                                    if let Some(&idx) = current_map.get(&key) {
-                                                        updated_downloads[idx] = item;
-                                                    } else {
-                                                        updated_downloads.push(item);
+                                    
+                                    if let Ok(response) = queued_torrents_result {
+                                        if let Some(data) = response.data {
+                                            let torrents_array = if let Some(arr) = data.as_array() {
+                                                Some(arr.clone())
+                                            } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                                queued_data.get("torrents").and_then(|v| v.as_array()).cloned()
+                                            } else {
+                                                None
+                                            };
+                                            
+                                            if let Some(torrents_array) = torrents_array {
+                                                for item in torrents_array {
+                                                    if let Ok(mut torrent) = serde_json::from_value::<Torrent>(item.clone()) {
+                                                        torrent.download_state = "queued".to_string();
+                                                        let item = DownloadItem::from(torrent);
+                                                        let key = (item.id, item.download_type.clone());
+                                                        seen_ids.insert(key.clone());
+                                                        
+                                                        if let Some(&idx) = current_map.get(&key) {
+                                                            downloads[idx] = item;
+                                                        } else {
+                                                            downloads.push(item);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                
-                                if let Ok(response) = queued_usenet_result {
-                                    if let Some(data) = response.data {
-                                        let usenet_array = if let Some(arr) = data.as_array() {
-                                            Some(arr.clone())
-                                        } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
-                                            queued_data.get("usenet").and_then(|v| v.as_array()).cloned()
-                                        } else {
-                                            None
-                                        };
-                                        
-                                        if let Some(usenet_array) = usenet_array {
-                                            for item in usenet_array {
-                                                if let Ok(mut usenet) = serde_json::from_value::<UsenetDownload>(item.clone()) {
-                                                    usenet.download_state = "queued".to_string();
-                                                    let item = DownloadItem::from(usenet);
-                                                    let key = (item.id, item.download_type.clone());
-                                                    seen_ids.insert(key.clone());
-                                                    
-                                                    if let Some(&idx) = current_map.get(&key) {
-                                                        updated_downloads[idx] = item;
-                                                    } else {
-                                                        updated_downloads.push(item);
+                                    
+                                    if let Ok(response) = queued_usenet_result {
+                                        if let Some(data) = response.data {
+                                            let usenet_array = if let Some(arr) = data.as_array() {
+                                                Some(arr.clone())
+                                            } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                                queued_data.get("usenet").and_then(|v| v.as_array()).cloned()
+                                            } else {
+                                                None
+                                            };
+                                            
+                                            if let Some(usenet_array) = usenet_array {
+                                                for item in usenet_array {
+                                                    if let Ok(mut usenet) = serde_json::from_value::<UsenetDownload>(item.clone()) {
+                                                        usenet.download_state = "queued".to_string();
+                                                        let item = DownloadItem::from(usenet);
+                                                        let key = (item.id, item.download_type.clone());
+                                                        seen_ids.insert(key.clone());
+                                                        
+                                                        if let Some(&idx) = current_map.get(&key) {
+                                                            downloads[idx] = item;
+                                                        } else {
+                                                            downloads.push(item);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                
-                                if let Ok(response) = queued_webdl_result {
-                                    if let Some(data) = response.data {
-                                        let webdl_array = if let Some(arr) = data.as_array() {
-                                            Some(arr.clone())
-                                        } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
-                                            queued_data.get("webdl").and_then(|v| v.as_array()).cloned()
-                                        } else {
-                                            None
-                                        };
-                                        
-                                        if let Some(webdl_array) = webdl_array {
-                                            for item in webdl_array {
-                                                if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
-                                                    web_dl.status = "queued".to_string();
-                                                    let item = DownloadItem::from(web_dl);
-                                                    let key = (item.id, item.download_type.clone());
-                                                    seen_ids.insert(key.clone());
-                                                    
-                                                    if let Some(&idx) = current_map.get(&key) {
-                                                        updated_downloads[idx] = item;
-                                                    } else {
-                                                        updated_downloads.push(item);
+                                    
+                                    if let Ok(response) = queued_webdl_result {
+                                        if let Some(data) = response.data {
+                                            let webdl_array = if let Some(arr) = data.as_array() {
+                                                Some(arr.clone())
+                                            } else if let Ok(queued_data) = serde_json::from_value::<serde_json::Value>(data) {
+                                                queued_data.get("webdl").and_then(|v| v.as_array()).cloned()
+                                            } else {
+                                                None
+                                            };
+                                            
+                                            if let Some(webdl_array) = webdl_array {
+                                                for item in webdl_array {
+                                                    if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
+                                                        web_dl.status = "queued".to_string();
+                                                        let item = DownloadItem::from(web_dl);
+                                                        let key = (item.id, item.download_type.clone());
+                                                        seen_ids.insert(key.clone());
+                                                        
+                                                        if let Some(&idx) = current_map.get(&key) {
+                                                            downloads[idx] = item;
+                                                        } else {
+                                                            downloads.push(item);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                
-                                updated_downloads.retain(|item| {
-                                    seen_ids.contains(&(item.id, item.download_type.clone()))
+                                    
+                                    downloads.retain(|item| {
+                                        seen_ids.contains(&(item.id, item.download_type.clone()))
+                                    });
                                 });
-                                
-                                downloads_poll.set(updated_downloads);
                             }
                         }
                     }
                 }
                 
-                let current_downloads_check = downloads_poll.get();
-                let has_network_activity = current_downloads_check.iter()
-                    .any(|item| item.active && (item.download_speed > 0 || item.upload_speed > 0));
-                let poll_interval = if has_network_activity { 5000 } else { 10000 };
+                let poll_interval = 10000;
                 
                 let promise = Promise::new(&mut |resolve, _| {
                     let window = web_sys::window().unwrap();
@@ -1544,29 +1532,83 @@ pub fn DownloadsTable(
         let expanded_file_rows = expanded_file_rows.clone();
         let downloads = downloads.clone();
         move || {
-            let current_downloads = downloads.get();
-            let mut expanded = expanded_file_rows.get();
-            let downloads_with_files: Vec<i32> = current_downloads.iter()
-                .filter(|d| !d.files.is_empty())
-                .map(|d| d.id)
-                .collect();
-            
-            let all_expanded = downloads_with_files.iter().all(|id| expanded.contains(id));
-            
-            if all_expanded {
-                for id in downloads_with_files {
-                    expanded.remove(&id);
-                }
-            } else {
-                for id in downloads_with_files {
-                    expanded.insert(id);
-                }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let expanded_file_rows_clone = expanded_file_rows.clone();
+                let downloads_clone = downloads.clone();
+                spawn_local(async move {
+                    use wasm_bindgen_futures::JsFuture;
+                    use web_sys::js_sys::Promise;
+                    
+                    async fn yield_to_browser() {
+                        let promise = Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED);
+                        let _ = JsFuture::from(promise).await;
+                    }
+                    
+                    let current_downloads = downloads_clone.get();
+                    let mut expanded = expanded_file_rows_clone.get();
+                    let downloads_with_files: Vec<i32> = current_downloads.iter()
+                        .filter(|d| !d.files.is_empty())
+                        .map(|d| d.id)
+                        .collect();
+                    
+                    let all_expanded = downloads_with_files.iter().all(|id| expanded.contains(id));
+                    
+                    const BATCH_SIZE: usize = 50;
+                    let chunks: Vec<&[i32]> = downloads_with_files.chunks(BATCH_SIZE).collect();
+                    let total_chunks = chunks.len();
+                    
+                    if all_expanded {
+                        for (i, chunk) in chunks.iter().enumerate() {
+                            for id in *chunk {
+                                expanded.remove(id);
+                            }
+                            expanded_file_rows_clone.set(expanded.clone());
+                            
+                            if i < total_chunks - 1 {
+                                yield_to_browser().await;
+                            }
+                        }
+                    } else {
+                        for (i, chunk) in chunks.iter().enumerate() {
+                            for id in *chunk {
+                                expanded.insert(*id);
+                            }
+                            expanded_file_rows_clone.set(expanded.clone());
+                            
+                            if i < total_chunks - 1 {
+                                yield_to_browser().await;
+                            }
+                        }
+                    }
+                });
             }
-            expanded_file_rows.set(expanded);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let current_downloads = downloads.get();
+                let mut expanded = expanded_file_rows.get();
+                let downloads_with_files: Vec<i32> = current_downloads.iter()
+                    .filter(|d| !d.files.is_empty())
+                    .map(|d| d.id)
+                    .collect();
+                
+                let all_expanded = downloads_with_files.iter().all(|id| expanded.contains(id));
+                
+                if all_expanded {
+                    for id in downloads_with_files {
+                        expanded.remove(&id);
+                    }
+                } else {
+                    for id in downloads_with_files {
+                        expanded.insert(id);
+                    }
+                }
+                expanded_file_rows.set(expanded);
+            }
         }
     };
 
-    let filtered_downloads = create_memo(move |_| {
+    let filtered_downloads = Memo::new(move |_| {
         let mut filtered = downloads.get();
         let status_filter_val = status_filter.get();
         let type_filter_val = type_filter.get();
@@ -1575,8 +1617,11 @@ pub fn DownloadsTable(
         
         if status_filter_val != "all" {
             let filter_status = status_filter_val.to_lowercase();
+            let cache = status_cache.get();
             filtered.retain(|download| {
-                let normalized = normalize_status(&download.status);
+                let normalized = cache.get(&download.id)
+                    .map(|(n, _)| n.clone())
+                    .unwrap_or_else(|| normalize_status(&download.status));
                 let normalized_lower = normalized.to_lowercase();
                 
                 if normalized_lower == filter_status {
@@ -1627,12 +1672,13 @@ pub fn DownloadsTable(
                     if is_desc { result.reverse() } else { result }
                 }
                 "status" => {
-                    let a_priority = get_status_priority(&a.status);
-                    let b_priority = get_status_priority(&b.status);
+                    let cache = status_cache.get();
+                    let a_priority = cache.get(&a.id).map(|(_, p)| *p).unwrap_or_else(|| get_status_priority(&a.status));
+                    let b_priority = cache.get(&b.id).map(|(_, p)| *p).unwrap_or_else(|| get_status_priority(&b.status));
                     let result = a_priority.cmp(&b_priority);
                     if result == std::cmp::Ordering::Equal {
-                        let a_normalized = normalize_status(&a.status);
-                        let b_normalized = normalize_status(&b.status);
+                        let a_normalized = cache.get(&a.id).map(|(n, _)| n.clone()).unwrap_or_else(|| normalize_status(&a.status));
+                        let b_normalized = cache.get(&b.id).map(|(n, _)| n.clone()).unwrap_or_else(|| normalize_status(&b.status));
                         let name_result = a_normalized.cmp(&b_normalized);
                         if is_desc { name_result.reverse() } else { name_result }
                     } else {
@@ -3065,19 +3111,19 @@ pub fn DownloadsTable(
                     <div class="p-4">
                         <div class="flex flex-col gap-3">
                             <div class="flex flex-col gap-2">
-                                <label class="block text-xs font-medium" style="color: var(--text-secondary);">"Status"</label>
-                                <div class="flex flex-wrap gap-1.5 md:gap-3">
+                                <label class="block text-xs sm:text-sm font-medium" style="color: var(--text-secondary);">"Status"</label>
+                                <div class="flex flex-wrap gap-1.5 sm:gap-2 md:gap-3">
                                     {
                                         let status_filter_clone = status_filter.clone();
                                         let get_download_counts_clone = get_download_counts.clone();
                                         view! {
                                             <button
-                                                class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_clone.get() == "all" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_clone.get() == "all" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                 style={move || {
                                                     if status_filter_clone.get() == "all" {
-                                                        "background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                        "background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.4);".to_string()
                                                     } else {
-                                                        "background-color: rgba(156, 163, 175, 0.1); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                        "background-color: rgba(156, 163, 175, 0.1); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.2);".to_string()
                                                     }
                                                 }}
                                                 on:click=move |_| status_filter_clone.set("all".to_string())
@@ -3092,12 +3138,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || queued_count() != 0>
                                                         <button
-                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_queued.get() == "queued" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_queued.get() == "queued" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_queued.get() == "queued" {
-                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2);".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -3121,12 +3167,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || downloading_count() != 0>
                                                         <button
-                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_downloading.get() == "downloading" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_downloading.get() == "downloading" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_downloading.get() == "downloading" {
-                                                                    "background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1.5px solid rgba(59, 130, 246, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1.5px solid rgba(59, 130, 246, 0.4);".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1.5px solid rgba(59, 130, 246, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1.5px solid rgba(59, 130, 246, 0.2);".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -3150,12 +3196,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || seeding_count() != 0>
                                                         <button
-                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_seeding.get() == "seeding" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_seeding.get() == "seeding" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_seeding.get() == "seeding" {
-                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2);".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -3179,12 +3225,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || cached_count() != 0>
                                                         <button
-                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_cached.get() == "cached" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_cached.get() == "cached" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_cached.get() == "cached" {
-                                                                    "background-color: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.4);".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(34, 197, 94, 0.1); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(34, 197, 94, 0.1); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.2);".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -3208,12 +3254,12 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || inactive_count() != 0>
                                                         <button
-                                                            class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_inactive.get() == "inactive" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_inactive.get() == "inactive" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_inactive.get() == "inactive" {
-                                                                    "background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.4);".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(248, 113, 113, 0.1); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(248, 113, 113, 0.1); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.2);".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {
@@ -3631,12 +3677,25 @@ pub fn DownloadsTable(
                                                          </span>
                                                      </td>
                                                     <td class="px-6 py-4" style="width: 120px;">
-                                                        <span 
-                                                            class={format!("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {}", if is_blurred.get() { "select-none" } else { "" })} 
-                                                            style={format!("{} {}", get_status_badge_style(&download.status), if is_blurred.get() { "opacity: 0.3; text-shadow: 0 0 8px rgba(255,255,255,0.5);" } else { "" })}
-                                                        >
-                                                            {normalize_status(&download.status)}
-                                                        </span>
+                                                        {
+                                                            // Use cached normalized status instead of recalculating
+                                                            let status_cache_val = status_cache.get();
+                                                            let normalized_status = status_cache_val.get(&download.id)
+                                                                .map(|(n, _)| n.clone())
+                                                                .unwrap_or_else(|| normalize_status(&download.status));
+                                                            let status_style = status_cache_val.get(&download.id)
+                                                                .map(|(n, _)| get_status_badge_style(n))
+                                                                .unwrap_or_else(|| get_status_badge_style(&download.status));
+                                                            
+                                                            view! {
+                                                                <span 
+                                                                    class={format!("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {}", if is_blurred.get() { "select-none" } else { "" })} 
+                                                                    style={format!("{} {}", status_style, if is_blurred.get() { "opacity: 0.3; text-shadow: 0 0 8px rgba(255,255,255,0.5);" } else { "" })}
+                                                                >
+                                                                    {normalized_status}
+                                                                </span>
+                                                            }
+                                                        }
                                                     </td>
                                                     <td class="px-6 py-4" style="width: 80px;">
                                                         <span class={format!("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {}", if is_blurred.get() { "select-none" } else { "" })} class:bg-blue-900={move || download.download_type == DownloadType::Torrent} class:text-blue-300={move || download.download_type == DownloadType::Torrent} class:bg-green-900={move || download.download_type == DownloadType::WebDownload} class:text-green-300={move || download.download_type == DownloadType::WebDownload} class:bg-purple-900={move || download.download_type == DownloadType::Usenet} class:text-purple-300={move || download.download_type == DownloadType::Usenet} style={if is_blurred.get() { "opacity: 0.3; text-shadow: 0 0 8px rgba(255,255,255,0.5);" } else { "" }}>

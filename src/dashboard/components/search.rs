@@ -765,11 +765,11 @@ pub fn SearchComponent() -> impl IntoView {
                     </div>
                     
                     <div class="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                        <div class="flex items-center gap-3 w-full sm:w-auto">
-                            <span class="text-sm font-medium shrink-0" style="color: var(--text-secondary);">"Type:"</span>
+                        <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                            <span class="text-xs sm:text-sm font-medium shrink-0" style="color: var(--text-secondary);">"Type:"</span>
                             <div class="flex gap-0.5 rounded-lg" style="background-color: var(--bg-secondary); border: 1px solid var(--border-secondary);">
                             <button
-                                class="px-4 py-2 text-sm font-medium transition-all"
+                                class="px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all min-h-[36px] sm:min-h-0"
                                 style=move || {
                                     let is_active = search_type.get() == SearchType::Torrents;
                                     let classes = if is_active {
@@ -784,7 +784,7 @@ pub fn SearchComponent() -> impl IntoView {
                                 "Torrents"
                             </button>
                             <button
-                                class="px-4 py-2 text-sm font-medium transition-all"
+                                class="px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all min-h-[36px] sm:min-h-0"
                                 style=move || {
                                     let has_plan = has_plan_2();
                                     let is_active = search_type.get() == SearchType::Usenet;
@@ -806,7 +806,7 @@ pub fn SearchComponent() -> impl IntoView {
                                 "Usenet"
                             </button>
                             <button
-                                class="px-4 py-2 text-sm font-medium transition-all"
+                                class="px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all min-h-[36px] sm:min-h-0"
                                 style=move || {
                                     let has_plan = has_plan_2();
                                     let is_active = search_type.get() == SearchType::Both;
@@ -828,7 +828,7 @@ pub fn SearchComponent() -> impl IntoView {
                                 "Both"
                             </button>
                             <button
-                                class="px-4 py-2 text-sm font-medium transition-all"
+                                class="px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all min-h-[36px] sm:min-h-0"
                                 style=move || {
                                     let is_active = search_type.get() == SearchType::IMDB;
                                     let classes = if is_active {

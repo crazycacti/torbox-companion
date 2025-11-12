@@ -311,8 +311,8 @@ pub fn DashboardHeader() -> impl IntoView {
 
             <Show when=move || mobile_menu_open.get()>
                 <div 
-                    class="md:hidden absolute top-full left-0 right-0 w-full rounded-b-xl overflow-hidden shadow-2xl z-40"
-                    style="background-color: var(--bg-card); border: 1px solid var(--border-secondary); border-top: none;"
+                    class="md:hidden absolute top-full left-0 right-0 rounded-b-xl overflow-hidden shadow-2xl z-40"
+                    style="background-color: var(--bg-card); border: 1px solid var(--border-secondary); border-top: none; margin-left: 0.5rem; margin-right: 0.5rem; width: calc(100% - 1rem);"
                     on:click=|ev| ev.stop_propagation()
                 >
                     <nav class="p-4 space-y-1">

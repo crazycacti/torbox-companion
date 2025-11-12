@@ -66,16 +66,20 @@ pub fn NetworkActivityChart() -> impl IntoView {
     let canvas_ref = NodeRef::<leptos::html::Canvas>::new();
     
     const TEN_MINUTES_MS: f64 = 10.0 * 60.0 * 1000.0;
+    const REDRAW_THROTTLE_MS: f64 = 100.0; 
+    
+    #[cfg(target_arch = "wasm32")]
+    let last_redraw_time = RwSignal::new(0.0f64);
     
     Effect::new(move |_| {
         let (dl_speed, ul_speed) = current_speeds.get();
         
+        #[cfg(target_arch = "wasm32")]
+        let now = js_sys::Date::now();
+        #[cfg(not(target_arch = "wasm32"))]
+        let now = 0.0;
+        
         if dl_speed > 0 || ul_speed > 0 {
-            #[cfg(target_arch = "wasm32")]
-            let now = js_sys::Date::now();
-            #[cfg(not(target_arch = "wasm32"))]
-            let now = 0.0;
-            
             data_points.update(|points| {
                 points.push_back(DataPoint {
                     timestamp: now,
@@ -94,21 +98,28 @@ pub fn NetworkActivityChart() -> impl IntoView {
             
             #[cfg(target_arch = "wasm32")]
             {
-                use wasm_bindgen_futures::JsFuture;
-                use web_sys::js_sys::Promise;
+                let last_redraw = last_redraw_time.get();
+                let time_since_last_redraw = now - last_redraw;
                 
-                let canvas_ref_clone = canvas_ref.clone();
-                let data_points_clone = data_points.get();
-                let hovered_point_clone = hovered_point.clone();
-                spawn_local(async move {
-                    let promise = Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED);
-                    let _ = JsFuture::from(promise).await;
-                    draw_chart(&canvas_ref_clone, &data_points_clone, &hovered_point_clone);
-                });
+                if time_since_last_redraw >= REDRAW_THROTTLE_MS {
+                    last_redraw_time.set(now);
+                    use wasm_bindgen_futures::JsFuture;
+                    use web_sys::js_sys::Promise;
+                    
+                    let canvas_ref_clone = canvas_ref.clone();
+                    let data_points_clone = data_points.get();
+                    let hovered_point_clone = hovered_point.clone();
+                    spawn_local(async move {
+                        let promise = Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED);
+                        let _ = JsFuture::from(promise).await;
+                        draw_chart(&canvas_ref_clone, &data_points_clone, &hovered_point_clone);
+                    });
+                }
             }
         } else {
             #[cfg(target_arch = "wasm32")]
             {
+                // Redraw once when activity stops
                 let canvas_ref_clone = canvas_ref.clone();
                 let data_points_clone = data_points.get();
                 let hovered_point_clone = hovered_point.clone();
@@ -430,15 +441,6 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     return;
                 }
                 
-                let padding = 60.0;
-                let chart_width = (width - padding * 2.0).max(0.0);
-                let chart_height = (height - padding * 2.0).max(0.0);
-                
-                let now = js_sys::Date::now();
-                let oldest_time = data_points.front().map(|p| p.timestamp).unwrap_or(now - (10.0 * 60.0 * 1000.0));
-                let newest_time = data_points.back().map(|p| p.timestamp).unwrap_or(now);
-                let actual_time_range = (newest_time - oldest_time).max(1000.0);
-                
                 let max_dl = data_points.iter()
                     .map(|p| p.download_speed)
                     .max()
@@ -454,13 +456,30 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     1024.0
                 };
                 
+                let y_ticks = 5;
+                let max_label = format_speed(max_speed as i64);
+                let estimated_char_width = 7.0;
+                let max_label_width = max_label.len() as f64 * estimated_char_width;
+                let left_padding = (max_label_width + 20.0).max(70.0); 
+                let right_padding = 40.0;
+                let top_padding = 20.0;
+                let bottom_padding = 40.0;
+                
+                let chart_width = (width - left_padding - right_padding).max(0.0);
+                let chart_height = (height - top_padding - bottom_padding).max(0.0);
+                
+                let now = js_sys::Date::now();
+                let oldest_time = data_points.front().map(|p| p.timestamp).unwrap_or(now - (10.0 * 60.0 * 1000.0));
+                let newest_time = data_points.back().map(|p| p.timestamp).unwrap_or(now);
+                let actual_time_range = (newest_time - oldest_time).max(1000.0);
+                
                 ctx.set_stroke_style_str(&border_color);
                 ctx.set_line_width(1.0);
                 
                 ctx.begin_path();
-                ctx.move_to(padding, padding);
-                ctx.line_to(padding, height - padding);
-                ctx.line_to(width - padding, height - padding);
+                ctx.move_to(left_padding, top_padding);
+                ctx.line_to(left_padding, height - bottom_padding);
+                ctx.line_to(width - right_padding, height - bottom_padding);
                 ctx.stroke();
                 
                 ctx.set_fill_style_str(&text_secondary);
@@ -468,19 +487,18 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                 ctx.set_text_align("right");
                 ctx.set_text_baseline("middle");
                 
-                let y_ticks = 5;
                 for i in 0..=y_ticks {
-                    let y = padding + (chart_height / y_ticks as f64) * (y_ticks - i) as f64;
+                    let y = top_padding + (chart_height / y_ticks as f64) * (y_ticks - i) as f64;
                     let value = (max_speed / y_ticks as f64) * i as f64;
                     let label = format_speed(value as i64);
                     
-                    ctx.fill_text(&label, padding - 8.0, y).ok();
+                    ctx.fill_text(&label, left_padding - 10.0, y).ok();
                     
                     ctx.set_stroke_style_str(&border_color);
                     ctx.set_line_width(0.5);
                     ctx.begin_path();
-                    ctx.move_to(padding, y);
-                    ctx.line_to(width - padding, y);
+                    ctx.move_to(left_padding, y);
+                    ctx.line_to(width - right_padding, y);
                     ctx.stroke();
                 }
                 
@@ -500,12 +518,12 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     for (idx, point) in data_points.iter().enumerate() {
                         if idx % step == 0 || idx == data_points.len() - 1 {
                             let x = if actual_time_range > 0.0 {
-                                padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                                left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
                             } else {
-                                padding
+                                left_padding
                             };
                             let label = format_timestamp(point.timestamp);
-                            ctx.fill_text(&label, x, height - padding + 8.0).ok();
+                            ctx.fill_text(&label, x, height - bottom_padding + 8.0).ok();
                         }
                     }
                 }
@@ -516,7 +534,7 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     let download_fill = "rgba(52, 211, 153, 0.2)";
                     let upload_fill = "rgba(248, 113, 113, 0.2)";
                     
-                    let bottom_y = height - padding;
+                    let bottom_y = height - bottom_padding;
                     
                     ctx.set_line_width(2.0);
                     ctx.set_line_cap("round");
@@ -527,11 +545,11 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     let mut first = true;
                     for point in data_points.iter() {
                         let x = if actual_time_range > 0.0 {
-                            padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
-                        let y = height - padding - ((point.download_speed as f64 / max_speed) * chart_height);
+                        let y = height - bottom_padding - ((point.download_speed as f64 / max_speed) * chart_height);
                         
                         if first {
                             ctx.move_to(x, bottom_y);
@@ -541,9 +559,9 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     }
                     if let Some(last_point) = data_points.back() {
                         let last_x = if actual_time_range > 0.0 {
-                            padding + ((last_point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((last_point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
                         ctx.line_to(last_x, bottom_y);
                         ctx.close_path();
@@ -555,11 +573,11 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     let mut first = true;
                     for point in data_points.iter() {
                         let x = if actual_time_range > 0.0 {
-                            padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
-                        let y = height - padding - ((point.download_speed as f64 / max_speed) * chart_height);
+                        let y = height - bottom_padding - ((point.download_speed as f64 / max_speed) * chart_height);
                         
                         if first {
                             ctx.move_to(x, y);
@@ -575,11 +593,11 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     let mut first = true;
                     for point in data_points.iter() {
                         let x = if actual_time_range > 0.0 {
-                            padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
-                        let y = height - padding - ((point.upload_speed as f64 / max_speed) * chart_height);
+                        let y = height - bottom_padding - ((point.upload_speed as f64 / max_speed) * chart_height);
                         
                         if first {
                             ctx.move_to(x, bottom_y);
@@ -589,9 +607,9 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     }
                     if let Some(last_point) = data_points.back() {
                         let last_x = if actual_time_range > 0.0 {
-                            padding + ((last_point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((last_point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
                         ctx.line_to(last_x, bottom_y);
                         ctx.close_path();
@@ -603,11 +621,11 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     let mut first = true;
                     for point in data_points.iter() {
                         let x = if actual_time_range > 0.0 {
-                            padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
-                        let y = height - padding - ((point.upload_speed as f64 / max_speed) * chart_height);
+                        let y = height - bottom_padding - ((point.upload_speed as f64 / max_speed) * chart_height);
                         
                         if first {
                             ctx.move_to(x, y);
@@ -626,11 +644,11 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     ctx.set_fill_style_str(download_color);
                     for point in data_points.iter() {
                         let x = if actual_time_range > 0.0 {
-                            padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
-                        let y = height - padding - ((point.download_speed as f64 / max_speed) * chart_height);
+                        let y = height - bottom_padding - ((point.download_speed as f64 / max_speed) * chart_height);
                         
                         let dot_size = if hovered_x.map(|hx| (hx - x).abs() < 5.0).unwrap_or(false) {
                             5.0
@@ -646,11 +664,11 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     ctx.set_fill_style_str(upload_color);
                     for point in data_points.iter() {
                         let x = if actual_time_range > 0.0 {
-                            padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                            left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
                         } else {
-                            padding
+                            left_padding
                         };
-                        let y = height - padding - ((point.upload_speed as f64 / max_speed) * chart_height);
+                        let y = height - bottom_padding - ((point.upload_speed as f64 / max_speed) * chart_height);
                         
                         let dot_size = if hovered_x.map(|hx| (hx - x).abs() < 5.0).unwrap_or(false) {
                             5.0
@@ -682,10 +700,8 @@ fn find_hovered_point(
     
     if let Some(canvas) = canvas_ref.get() {
         let rect = canvas.get_bounding_client_rect();
-        
-        let padding = 60.0;
-        let chart_width = (rect.width() - padding * 2.0).max(0.0);
-        let chart_height = (300.0 - padding * 2.0).max(0.0);
+        let width = rect.width();
+        let height = rect.height();
         
         let now = js_sys::Date::now();
         let oldest_time = data_points.front().map(|p| p.timestamp).unwrap_or(now - (10.0 * 60.0 * 1000.0));
@@ -701,17 +717,28 @@ fn find_hovered_point(
             1024.0
         };
         
+        let max_label = format_speed(max_speed as i64);
+        let estimated_char_width = 7.0;
+        let max_label_width = max_label.len() as f64 * estimated_char_width;
+        let left_padding = (max_label_width + 20.0).max(70.0);
+        let right_padding = 40.0;
+        let top_padding = 20.0;
+        let bottom_padding = 40.0;
+        
+        let chart_width = (width - left_padding - right_padding).max(0.0f64);
+        let chart_height = (height - top_padding - bottom_padding).max(0.0f64);
+        
         let hover_threshold = 8.0;
         
         for point in data_points.iter() {
             let x = if actual_time_range > 0.0 {
-                padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
+                left_padding + ((point.timestamp - oldest_time) / actual_time_range) * chart_width
             } else {
-                padding
+                left_padding
             };
             
-            let dl_y = 300.0 - padding - ((point.download_speed as f64 / max_speed) * chart_height);
-            let ul_y = 300.0 - padding - ((point.upload_speed as f64 / max_speed) * chart_height);
+            let dl_y = height - bottom_padding - ((point.download_speed as f64 / max_speed) * chart_height);
+            let ul_y = height - bottom_padding - ((point.upload_speed as f64 / max_speed) * chart_height);
             
             let dist_dl = ((mouse_x - x).powi(2) + (mouse_y - dl_y).powi(2)).sqrt();
             let dist_ul = ((mouse_x - x).powi(2) + (mouse_y - ul_y).powi(2)).sqrt();
