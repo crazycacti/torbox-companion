@@ -3325,72 +3325,72 @@ pub fn DownloadsTable(
             </Show>
 
 
-            <div class={move || format!("rounded-lg p-4 mb-4 transition-all duration-200 {}", if show_bulk_actions.get() { "" } else { "opacity-50" })} style={move || format!("background: var(--bg-card); border: 1px solid var(--border-secondary); {}", if show_bulk_actions.get() { "" } else { "opacity: 0.5;" })}>
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-4">
-                        <span class={move || format!("text-sm transition-colors {}", if show_bulk_actions.get() { "text-white" } else { "" })} style={move || format!("color: var(--text-primary); {}", if show_bulk_actions.get() { "" } else { "opacity: 0.6;" })}>
-                            {move || {
-                                let state = selection_state.get();
-                                let item_count = state.selected_items.len();
-                                let file_count = state.selected_files.values().map(|files| files.len()).sum::<usize>();
-                                if item_count > 0 && file_count > 0 {
-                                    format!("{} items and {} files selected", item_count, file_count)
-                                } else if item_count > 0 {
-                                    format!("{} items selected", item_count)
-                                } else if file_count > 0 {
-                                    format!("{} files selected", file_count)
-                                } else {
-                                    "No items selected".to_string()
-                                }
-                            }}
-                        </span>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <button
-                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if show_bulk_actions.get() && !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
-                            style={move || if show_bulk_actions.get() && !bulk_action_loading.get() { "background-color: var(--accent-secondary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                            disabled=move || !show_bulk_actions.get() || bulk_action_loading.get()
-                            on:click=move |_| if show_bulk_actions.get() && !bulk_action_loading.get() { handle_bulk_download() }
-                        >
-                            <Show when=move || bulk_action_loading.get()>
-                                                <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Accent/>
-                                            </Show>
-                            "Download Selected"
-                        </button>
-                        <button
-                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if show_bulk_actions.get() && !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
-                            style={move || if show_bulk_actions.get() && !bulk_action_loading.get() { "background-color: var(--accent-danger); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                            disabled=move || !show_bulk_actions.get() || bulk_action_loading.get()
-                            on:click=move |_| if show_bulk_actions.get() && !bulk_action_loading.get() { handle_bulk_delete() }
-                        >
-                            <Show when=move || bulk_action_loading.get()>
-                                                <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Danger/>
-                                            </Show>
-                            "Delete Selected"
-                        </button>
-                        <button
-                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if show_bulk_actions.get() { "" } else { "cursor-not-allowed" })}
-                            style={move || if show_bulk_actions.get() { "background-color: var(--bg-tertiary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                            disabled=move || !show_bulk_actions.get()
-                            on:click=move |_| if show_bulk_actions.get() { handle_bulk_copy_links() }
-                            title="Copy Links"
-                        >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                            </svg>
-                            "Copy Links"
-                        </button>
-                        <button
-                            class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors {}", if show_bulk_actions.get() { "" } else { "cursor-not-allowed" })}
-                            style={move || if show_bulk_actions.get() { "background-color: var(--bg-tertiary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
-                            disabled=move || !show_bulk_actions.get()
-                            on:click=move |_| if show_bulk_actions.get() { clear_selection() }
-                        >
-                            "Clear Selection"
-                        </button>
+            <Show when=move || show_bulk_actions.get()>
+                <div class="rounded-lg p-4 mb-4 transition-all duration-200" style="background: var(--bg-card); border: 1px solid var(--border-secondary);">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <span class="text-sm" style="color: var(--text-primary);">
+                                {move || {
+                                    let state = selection_state.get();
+                                    let item_count = state.selected_items.len();
+                                    let file_count = state.selected_files.values().map(|files| files.len()).sum::<usize>();
+                                    if item_count > 0 && file_count > 0 {
+                                        format!("{} items and {} files selected", item_count, file_count)
+                                    } else if item_count > 0 {
+                                        format!("{} items selected", item_count)
+                                    } else if file_count > 0 {
+                                        format!("{} files selected", file_count)
+                                    } else {
+                                        "No items selected".to_string()
+                                    }
+                                }}
+                            </span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button
+                                class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
+                                style={move || if !bulk_action_loading.get() { "background-color: var(--accent-secondary); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
+                                disabled=move || bulk_action_loading.get()
+                                on:click=move |_| if !bulk_action_loading.get() { handle_bulk_download() }
+                            >
+                                <Show when=move || bulk_action_loading.get()>
+                                    <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Accent/>
+                                </Show>
+                                "Download Selected"
+                            </button>
+                            <button
+                                class={move || format!("px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2 {}", if !bulk_action_loading.get() { "" } else { "cursor-not-allowed" })}
+                                style={move || if !bulk_action_loading.get() { "background-color: var(--accent-danger); color: var(--text-primary);" } else { "background-color: var(--bg-tertiary); color: var(--text-muted);" }}
+                                disabled=move || bulk_action_loading.get()
+                                on:click=move |_| if !bulk_action_loading.get() { handle_bulk_delete() }
+                            >
+                                <Show when=move || bulk_action_loading.get()>
+                                    <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Danger/>
+                                </Show>
+                                "Delete Selected"
+                            </button>
+                            <button
+                                class="px-4 py-2 text-sm rounded-lg transition-colors flex items-center gap-2"
+                                style="background-color: var(--bg-tertiary); color: var(--text-primary);"
+                                on:click=move |_| handle_bulk_copy_links()
+                                title="Copy Links"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                </svg>
+                                "Copy Links"
+                            </button>
+                            <button
+                                class="px-4 py-2 text-sm rounded-lg transition-colors"
+                                style="background-color: var(--bg-tertiary); color: var(--text-primary);"
+                                on:click=move |_| clear_selection()
+                            >
+                                "Clear Selection"
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </Show>
 
             <Show when=move || !loading.get() && error.get().is_none()>
                 <div class="rounded-xl border" style="background-color: var(--bg-card); border-color: var(--border-secondary);">

@@ -256,7 +256,7 @@ pub fn DashboardHeader() -> impl IntoView {
                         }}
                         on:click=move |_| active_tab.set("user".to_string())
                     >
-                        "User"
+                        "Info"
                     </button>
                 </nav>
 
@@ -362,7 +362,7 @@ pub fn DashboardHeader() -> impl IntoView {
                                 mobile_menu_open.set(false);
                             }
                         >
-                            "User"
+                            "Info"
                         </button>
                         <div class="border-t my-3" style="border-color: var(--border-secondary);"></div>
                         <div class="px-4 py-2">
