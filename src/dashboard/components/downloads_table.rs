@@ -827,7 +827,8 @@ fn get_status_color_style(status: &str) -> String {
     let normalized = normalize_status(status);
     match normalized.as_str() {
         "Completed" | "Cached" => "color: #4ade80;".to_string(), 
-        "Downloading" | "Seeding" | "Queued" => "color: #60a5fa;".to_string(), 
+        "Downloading" => "color: #3b82f6;".to_string(), 
+        "Seeding" | "Queued" => "color: #60a5fa;".to_string(), 
         "Paused" => "color: #facc15;".to_string(), 
         "Stalled" | "Failed" => "color: #f87171;".to_string(), 
         "Inactive" | "Expired" => "color: #9ca3af;".to_string(), 
@@ -840,7 +841,7 @@ fn get_status_badge_style(status: &str) -> String {
     match normalized.as_str() {
         "Completed" => "background-color: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3);".to_string(),
         "Cached" => "background-color: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3);".to_string(),
-        "Downloading" => "background-color: rgba(96, 165, 250, 0.15); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3);".to_string(),
+        "Downloading" => "background-color: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3);".to_string(),
         "Seeding" => "background-color: rgba(96, 165, 250, 0.15); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3);".to_string(),
         "Queued" => "background-color: rgba(96, 165, 250, 0.15); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3);".to_string(),
         "Paused" => "background-color: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3);".to_string(),
@@ -2013,19 +2014,19 @@ pub fn DownloadsTable(
     let handle_delete = {
         let action_loading_clone = action_loading.clone();
         let action_errors_clone = action_errors.clone();
-        let fetch_downloads_clone = fetch_downloads.clone();
+        let downloads_clone = downloads.clone();
         move |id: i32, download_type: DownloadType| {
             #[cfg(target_arch = "wasm32")]
             {
                 let action_loading_local = action_loading_clone.clone();
                 let action_errors_local = action_errors_clone.clone();
-                let fetch_downloads_local = fetch_downloads_clone.clone();
+                let downloads_local = downloads_clone.clone();
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
                             if let Ok(Some(api_key)) = storage.get_item("api_key") {
                                 if !api_key.is_empty() {
-                                    let client = TorboxClient::new(api_key);
+                                    let client = TorboxClient::new(api_key.clone());
                                     
                                     let mut loading_map = action_loading_local.get();
                                     loading_map.insert(id, "delete".to_string());
@@ -2043,20 +2044,81 @@ pub fn DownloadsTable(
                                         }
                                     };
                                     
-                                    let mut loading_map = action_loading_local.get();
-                                    loading_map.remove(&id);
-                                    action_loading_local.set(loading_map);
-                                    
                                     match result {
                                         Ok(_) => {
-                                            log!("Download deleted successfully: {}", id);
-                                            fetch_downloads_local();
+                                            log!("Delete request successful for ID: {}, polling until removed", id);
+                                            
+                                            let mut poll_count = 0;
+                                            const MAX_POLLS: i32 = 30;
+                                            
+                                            loop {
+                                                let still_exists = match download_type {
+                                                    DownloadType::Torrent => {
+                                                        client.get_torrent_list(Some(id), Some(false), None, None).await
+                                                            .ok()
+                                                            .and_then(|r| r.data)
+                                                            .map(|list| !list.is_empty())
+                                                            .unwrap_or(false)
+                                                    }
+                                                    DownloadType::WebDownload => {
+                                                        client.get_web_download_list(Some(id), Some(false), None, None).await
+                                                            .ok()
+                                                            .and_then(|r| r.data)
+                                                            .map(|list| !list.is_empty())
+                                                            .unwrap_or(false)
+                                                    }
+                                                    DownloadType::Usenet => {
+                                                        client.get_usenet_download_list(Some(id), Some(false), None, None).await
+                                                            .ok()
+                                                            .and_then(|r| r.data)
+                                                            .map(|list| !list.is_empty())
+                                                            .unwrap_or(false)
+                                                    }
+                                                };
+                                                
+                                                if !still_exists {
+                                                    downloads_local.update(|downloads| {
+                                                        downloads.retain(|item| !(item.id == id && item.download_type == download_type));
+                                                    });
+                                                    
+                                                    let mut loading_map = action_loading_local.get();
+                                                    loading_map.remove(&id);
+                                                    action_loading_local.set(loading_map);
+                                                    log!("Item {} removed from table", id);
+                                                    break;
+                                                }
+                                                
+                                                poll_count += 1;
+                                                if poll_count >= MAX_POLLS {
+                                                    log!("Max polls reached for delete, removing loading state");
+                                                    let mut loading_map = action_loading_local.get();
+                                                    loading_map.remove(&id);
+                                                    action_loading_local.set(loading_map);
+                                                    break;
+                                                }
+                                                
+                                                let promise = web_sys::js_sys::Promise::new(&mut |resolve, _| {
+                                                    let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                        resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                                                    });
+                                                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                        closure.as_ref().unchecked_ref(),
+                                                        1000,
+                                                    );
+                                                    closure.forget();
+                                                });
+                                                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                                            }
                                         }
                                         Err(e) => {
                                             let mut error_map = action_errors_local.get();
                                             error_map.insert(id, format!("Failed to delete: {:?}", e));
                                             action_errors_local.set(error_map);
                                             log!("Failed to delete download: {:?}", e);
+                                            
+                                            let mut loading_map = action_loading_local.get();
+                                            loading_map.remove(&id);
+                                            action_loading_local.set(loading_map);
                                             
                                             let (tx, rx) = futures::channel::oneshot::channel();
                                             if let Some(window_for_delay) = web_sys::window() {
@@ -3008,9 +3070,9 @@ pub fn DownloadsTable(
                                                 class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_clone.get() == "all" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                 style={move || {
                                                     if status_filter_clone.get() == "all" {
-                                                        "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                        "background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                     } else {
-                                                        "background-color: rgba(148, 163, 184, 0.1); color: var(--text-secondary); border: 1.5px solid rgba(148, 163, 184, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                        "background-color: rgba(156, 163, 175, 0.1); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                     }
                                                 }}
                                                 on:click=move |_| status_filter_clone.set("all".to_string())
@@ -3057,9 +3119,9 @@ pub fn DownloadsTable(
                                                             class={move || format!("px-3 py-0.5 md:px-3.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer {}", if status_filter_downloading.get() == "downloading" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_downloading.get() == "downloading" {
-                                                                    "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1.5px solid rgba(59, 130, 246, 0.4); padding: 0.125rem 0.875rem;".to_string()
                                                                 } else {
-                                                                    "background-color: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.2); padding: 0.125rem 0.875rem;".to_string()
+                                                                    "background-color: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1.5px solid rgba(59, 130, 246, 0.2); padding: 0.125rem 0.875rem;".to_string()
                                                                 }
                                                             }}
                                                             on:click=move |_| {

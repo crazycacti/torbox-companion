@@ -244,6 +244,7 @@ pub fn SearchComponent() -> impl IntoView {
     let total_results_count = RwSignal::new(0);
     let is_searching = RwSignal::new(false);
     let search_error = RwSignal::new(Option::<String>::None);
+    let downloading_items = RwSignal::new(std::collections::HashSet::<String>::new());
     
     let sort_field = RwSignal::new(SortField::Title);
     let sort_direction = RwSignal::new(SortDirection::Asc);
@@ -508,52 +509,73 @@ pub fn SearchComponent() -> impl IntoView {
         });
     };
     
-    let handle_download = move |item: SearchResultItem| {
-        spawn_local(async move {
-            #[cfg(target_arch = "wasm32")]
-            {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        if let Ok(Some(api_key)) = storage.get_item("api_key") {
-                            if !api_key.is_empty() {
-                                let client = TorboxClient::new(api_key);
-                                
-                                match item {
-                                    SearchResultItem::Torrent(t) => {
-                                        if let Some(magnet) = t.magnet {
-                                            let request = CreateTorrentRequest {
-                                                magnet: Some(magnet),
-                                                file: None,
-                                                seed: None,
-                                                allow_zip: None,
-                                                name: Some(t.title),
-                                                as_queued: None,
-                                                add_only_if_cached: None,
-                                            };
-                                            let _ = client.create_torrent(request).await;
+    let handle_download = {
+        let downloading_items_clone = downloading_items.clone();
+        move |item: SearchResultItem| {
+            let item_hash = item.hash();
+            let downloading_items_local = downloading_items_clone.clone();
+            
+            downloading_items_local.update(|set| {
+                set.insert(item_hash.clone());
+            });
+            
+            spawn_local(async move {
+                let cleanup = || {
+                    downloading_items_local.update(|set| {
+                        set.remove(&item_hash);
+                    });
+                };
+                
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                if !api_key.is_empty() {
+                                    let client = TorboxClient::new(api_key);
+                                    
+                                    match item {
+                                        SearchResultItem::Torrent(t) => {
+                                            if let Some(magnet) = t.magnet {
+                                                let request = CreateTorrentRequest {
+                                                    magnet: Some(magnet),
+                                                    file: None,
+                                                    seed: None,
+                                                    allow_zip: None,
+                                                    name: Some(t.title),
+                                                    as_queued: None,
+                                                    add_only_if_cached: None,
+                                                };
+                                                let _ = client.create_torrent(request).await;
+                                            }
+                                        }
+                                        SearchResultItem::Usenet(u) => {
+                                            if let Some(nzb_url) = u.nzb {
+                                                let request = CreateUsenetDownloadRequest {
+                                                    link: Some(nzb_url),
+                                                    file: None,
+                                                    name: Some(u.title),
+                                                    password: None,
+                                                    post_processing: None,
+                                                    as_queued: None,
+                                                    add_only_if_cached: None,
+                                                };
+                                                let _ = client.create_usenet_download(request).await;
+                                            }
                                         }
                                     }
-                                    SearchResultItem::Usenet(u) => {
-                                        if let Some(nzb_url) = u.nzb {
-                                            let request = CreateUsenetDownloadRequest {
-                                                link: Some(nzb_url),
-                                                file: None,
-                                                name: Some(u.title),
-                                                password: None,
-                                                post_processing: None,
-                                                as_queued: None,
-                                                add_only_if_cached: None,
-                                            };
-                                            let _ = client.create_usenet_download(request).await;
-                                        }
-                                    }
+                                    
+                                    cleanup();
+                                    return;
                                 }
                             }
                         }
                     }
                 }
-            }
-        });
+                
+                cleanup();
+            });
+        }
     };
     
     let handle_copy_magnet = move |item: SearchResultItem| {
@@ -1066,16 +1088,37 @@ pub fn SearchComponent() -> impl IntoView {
                                             </td>
                                             <td class="px-4 md:px-6 py-4">
                                                 <div class="flex items-center gap-2">
-                                                    <button
-                                                        class="p-2 rounded-lg transition-all flex items-center justify-center hover:opacity-80 hover:scale-105"
-                                                        style="background-color: transparent; color: var(--accent-secondary);"
-                                                        on:click=move |_| handle_download(item_download.clone())
-                                                        title="Download"
-                                                    >
-                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                                        </svg>
-                                                    </button>
+                                                    {move || {
+                                                        let item_hash_for_check = item_download.hash();
+                                                        let is_downloading = downloading_items.get().contains(&item_hash_for_check);
+                                                        let item_download_clone = item_download.clone();
+                                                        
+                                                        if is_downloading {
+                                                            view! {
+                                                                <button
+                                                                    class="p-2 rounded-lg transition-all flex items-center justify-center"
+                                                                    style="background-color: transparent; color: var(--accent-secondary); opacity: 0.6; cursor: not-allowed;"
+                                                                    disabled=true
+                                                                    title="Downloading..."
+                                                                >
+                                                                    <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Default/>
+                                                                </button>
+                                                            }.into_any()
+                                                        } else {
+                                                            view! {
+                                                                <button
+                                                                    class="p-2 rounded-lg transition-all flex items-center justify-center hover:opacity-80 hover:scale-105"
+                                                                    style="background-color: transparent; color: var(--accent-secondary);"
+                                                                    on:click=move |_| handle_download(item_download_clone.clone())
+                                                                    title="Download"
+                                                                >
+                                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                                                    </svg>
+                                                                </button>
+                                                            }.into_any()
+                                                        }
+                                                    }}
                                                     {move || {
                                                         if has_magnet {
                                                             let item_copy_btn = item_copy_for_magnet.clone();
