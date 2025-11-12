@@ -67,6 +67,21 @@ impl SearchResultItem {
             SearchResultItem::Usenet(u) => u.nzb.clone(),
         }
     }
+
+    pub fn parsed_title(&self) -> String {
+        match self {
+            SearchResultItem::Torrent(t) => {
+                t.title_parsed_data.as_ref()
+                    .and_then(|tpd| tpd.title.clone())
+                    .unwrap_or_else(|| t.title.clone())
+            }
+            SearchResultItem::Usenet(u) => {
+                u.title_parsed_data.as_ref()
+                    .and_then(|tpd| tpd.title.clone())
+                    .unwrap_or_else(|| u.title.clone())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -245,6 +260,7 @@ pub fn SearchComponent() -> impl IntoView {
     let is_searching = RwSignal::new(false);
     let search_error = RwSignal::new(Option::<String>::None);
     let downloading_items = RwSignal::new(std::collections::HashSet::<String>::new());
+    let expanded_groups = RwSignal::new(std::collections::HashSet::<String>::new());
     
     let sort_field = RwSignal::new(SortField::Title);
     let sort_direction = RwSignal::new(SortDirection::Asc);
@@ -266,6 +282,7 @@ pub fn SearchComponent() -> impl IntoView {
         let query = search_query.get();
         if query.trim().is_empty() {
             search_results.set(Vec::new());
+            expanded_groups.update(|set| set.clear());
             return;
         }
         
@@ -629,6 +646,35 @@ pub fn SearchComponent() -> impl IntoView {
         results
     };
     
+    let grouped_results = move || {
+        let results = sorted_results();
+        let mut groups: std::collections::HashMap<String, (String, Vec<SearchResultItem>)> = std::collections::HashMap::new();
+        
+        for item in results {
+            let parsed_title = item.parsed_title();
+            let group_key = parsed_title.to_lowercase();
+            let entry = groups.entry(group_key).or_insert_with(|| (parsed_title.clone(), Vec::new()));
+            entry.1.push(item);
+        }
+        
+        let mut grouped: Vec<(String, Vec<SearchResultItem>)> = groups.into_iter()
+            .map(|(_, (title, items))| (title, items))
+            .collect();
+        grouped.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        grouped
+    };
+    
+    let toggle_group = move |group_title: String| {
+        expanded_groups.update(|set| {
+            let key = group_title.to_lowercase();
+            if set.contains(&key) {
+                set.remove(&key);
+            } else {
+                set.insert(key);
+            }
+        });
+    };
+    
     let toggle_sort = move |field: SortField| {
         if sort_field.get() == field {
             sort_direction.update(|d| *d = match *d {
@@ -647,7 +693,7 @@ pub fn SearchComponent() -> impl IntoView {
         }>
             <div class="rounded-xl border p-4 sm:p-5 md:p-6" style="background-color: var(--bg-card); border-color: var(--border-secondary);">
                 <div class="flex flex-col gap-4">
-                    <div class="flex gap-2 items-stretch">
+                    <div class="flex gap-3 items-stretch">
                         <div class="flex-1 relative">
                             <input
                                 type="text"
@@ -695,6 +741,7 @@ pub fn SearchComponent() -> impl IntoView {
                                     search_results.set(Vec::new());
                                     total_results_count.set(0);
                                     search_error.set(None);
+                                    expanded_groups.update(|set| set.clear());
                                     }
                                     title="Clear search"
                                 >
@@ -932,221 +979,275 @@ pub fn SearchComponent() -> impl IntoView {
                             </thead>
                         <tbody>
                             {move || {
-                                sorted_results().into_iter().map(|item| {
-                                    let item_download = item.clone();
-                                    let item_magnet_check = item.clone();
-                                    let item_copy_magnet = item.clone();
-                                    let item_title = item.clone();
-                                    let item_title_for_raw = item.clone();
-                                    let item_size = item.clone();
-                                    let item_seeders = item.clone();
-                                    let item_type = item.clone();
-                                    
-                                    let details: Vec<String> = match &item {
-                                        SearchResultItem::Torrent(t) => {
-                                            if let Some(tpd) = &t.title_parsed_data {
-                                                let mut d = Vec::new();
-                                                if let Some(res) = &tpd.resolution {
-                                                    d.push(res.clone());
-                                                }
-                                                if let Some(qual) = &tpd.quality {
-                                                    d.push(qual.clone());
-                                                }
-                                                if let Some(codec) = &tpd.codec {
-                                                    d.push(codec.clone());
-                                                }
-                                                if let Some(season) = tpd.season {
-                                                    d.push(format!("S{:02}", season));
-                                                }
-                                                d
-                                            } else {
-                                                Vec::new()
-                                            }
-                                        }
-                                        SearchResultItem::Usenet(u) => {
-                                            if let Some(tpd) = &u.title_parsed_data {
-                                                let mut d = Vec::new();
-                                                if let Some(res) = &tpd.resolution {
-                                                    d.push(res.clone());
-                                                }
-                                                if let Some(qual) = &tpd.quality {
-                                                    d.push(qual.clone());
-                                                }
-                                                if let Some(codec) = &tpd.codec {
-                                                    d.push(codec.clone());
-                                                }
-                                                if let Some(season) = tpd.season {
-                                                    d.push(format!("S{:02}", season));
-                                                }
-                                                d
-                                            } else {
-                                                Vec::new()
-                                            }
-                                        }
-                                    };
-                                    let has_details = !details.is_empty();
-                                    let details_for_view = details.clone();
-                                    let has_magnet = item_magnet_check.magnet().is_some();
-                                    let item_copy_for_magnet = item_copy_magnet.clone();
+                                grouped_results().into_iter().map(|(group_title, items)| {
+                                    let group_title_clone = group_title.clone();
+                                    let group_title_for_toggle = group_title.clone();
+                                    let group_title_lower = group_title.to_lowercase();
+                                    let group_title_lower2 = group_title_lower.clone();
+                                    let expanded_groups_clone = expanded_groups.clone();
+                                    let expanded_groups_clone2 = expanded_groups.clone();
+                                    let is_expanded = move || expanded_groups_clone.get().contains(&group_title_lower);
+                                    let is_expanded2 = move || expanded_groups_clone2.get().contains(&group_title_lower2);
+                                    let items_count = items.len();
+                                    let downloading_items_clone = downloading_items.clone();
+                                    let handle_download_clone = handle_download.clone();
+                                    let handle_copy_magnet_clone = handle_copy_magnet.clone();
                                     
                                     view! {
-                                        <tr
-                                            class="border-b transition-colors hover:bg-opacity-5"
-                                            style="border-color: var(--border-secondary);"
-                                        >
-                                            <td class="px-4 md:px-6 py-4" style="color: var(--text-primary);">
-                                                <div class="flex flex-col gap-2">
-                                                    <div class="flex items-center gap-2">
-                                                        <span class="font-semibold text-sm sm:text-base leading-tight" style="color: var(--text-primary);">{item_title.title()}</span>
-                                                        {move || {
-                                                            match &item_title {
-                                                                SearchResultItem::Torrent(t) => {
-                                                                    if t.private.unwrap_or(false) {
-                                                                        view! {
-                                                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Private Tracker" style="color: #f97316;">
-                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                                                                            </svg>
-                                                                        }.into_any()
-                                                                    } else {
-                                                                        view! {}.into_any()
-                                                                    }
-                                                                }
-                                                                SearchResultItem::Usenet(_) => view! {}.into_any(),
-                                                            }
-                                                        }}
-                                                    </div>
-                                                    <div class="flex flex-col gap-1.5">
-                                                        <span class="text-xs sm:text-sm font-mono leading-relaxed" style="color: var(--text-secondary); opacity: 0.85; word-break: break-all;">
-                                                            {move || {
-                                                                match &item_title_for_raw {
-                                                                    SearchResultItem::Torrent(t) => t.raw_title.clone(),
-                                                                    SearchResultItem::Usenet(u) => u.raw_title.clone(),
-                                                                }
-                                                            }}
+                                        <>
+                                            <tr
+                                                class="border-b transition-colors cursor-pointer hover:bg-opacity-10"
+                                                style="border-color: var(--border-secondary); background-color: var(--bg-secondary);"
+                                                on:click=move |_| toggle_group(group_title_for_toggle.clone())
+                                            >
+                                                <td class="px-4 md:px-6 py-3" colspan="5" style="color: var(--text-primary);">
+                                                    <div class="flex items-center gap-3">
+                                                        <svg
+                                                            class="w-5 h-5 transition-transform"
+                                                            style={move || if is_expanded() { "transform: rotate(90deg);" } else { "transform: rotate(0deg);" }}
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            viewBox="0 0 24 24"
+                                                        >
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                                        </svg>
+                                                        <span class="font-semibold text-base" style="color: var(--text-primary);">
+                                                            {group_title_clone.clone()}
                                                         </span>
-                                                        <Show when=move || has_details>
-                                                            <div class="flex gap-1.5 flex-wrap">
-                                                                {details_for_view.iter().map(|d| {
-                                                                    let d_clone = d.clone();
-                                                                    view! {
-                                                                        <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3);">
-                                                                            {d_clone}
-                                                                        </span>
-                                                                    }
-                                                                }).collect::<Vec<_>>()}
-                                                            </div>
-                                                        </Show>
+                                                        <span class="text-sm" style="color: var(--text-secondary);">
+                                                            {format!("({} result{})", items_count, if items_count == 1 { "" } else { "s" })}
+                                                        </span>
                                                     </div>
-                                                </div>
-                                            </td>
-                                            <td class="px-4 md:px-6 py-4 font-medium text-sm" style="color: var(--text-secondary);">
-                                                {format_size(item_size.size())}
-                                            </td>
-                                            <td class="px-4 md:px-6 py-4 font-medium text-sm hidden sm:table-cell" style="color: var(--text-secondary);">
-                                                {move || {
-                                                    match &item_seeders {
-                                                        SearchResultItem::Torrent(t) => {
-                                                            t.last_known_seeders.map(|s| s.to_string()).unwrap_or_else(|| "-".to_string())
-                                                        }
-                                                        SearchResultItem::Usenet(_) => "-".to_string()
-                                                    }
-                                                }}
-                                            </td>
-                                            <td class="px-4 md:px-6 py-4">
-                                                {move || match &item_type {
-                                                    SearchResultItem::Torrent(t) => {
-                                                        let cached = t.cached.unwrap_or(false);
-                                                        view! {
-                                                            <div class="flex items-center gap-2">
-                                                                <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">
-                                                                    "Torrent"
-                                                                </span>
-                                                                <Show when=move || cached>
-                                                                    <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(34, 197, 94, 0.1); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.3);">
-                                                                        "Cached"
-                                                                    </span>
-                                                                </Show>
-                                                            </div>
-                                                        }.into_any()
-                                                    }
-                                                    SearchResultItem::Usenet(u) => {
-                                                        let cached = u.cached.unwrap_or(false);
-                                                        view! {
-                                                            <div class="flex items-center gap-2">
-                                                                <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(168, 85, 247, 0.1); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">
-                                                                    "Usenet"
-                                                                </span>
-                                                                <Show when=move || cached>
-                                                                    <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(34, 197, 94, 0.1); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.3);">
-                                                                        "Cached"
-                                                                    </span>
-                                                                </Show>
-                                                            </div>
-                                                        }.into_any()
-                                                    }
-                                                }}
-                                            </td>
-                                            <td class="px-4 md:px-6 py-4">
-                                                <div class="flex items-center gap-2">
-                                                    {move || {
-                                                        let item_hash_for_check = item_download.hash();
-                                                        let is_downloading = downloading_items.get().contains(&item_hash_for_check);
-                                                        let item_download_clone = item_download.clone();
+                                                </td>
+                                            </tr>
+                                            {move || {
+                                                if is_expanded2() {
+                                                    let items_clone = items.clone();
+                                                    items_clone.into_iter().map(|item| {
+                                                        let item_download = item.clone();
+                                                        let item_magnet_check = item.clone();
+                                                        let item_copy_magnet = item.clone();
+                                                        let item_title = item.clone();
+                                                        let item_title_for_raw = item.clone();
+                                                        let item_size = item.clone();
+                                                        let item_seeders = item.clone();
+                                                        let item_type = item.clone();
                                                         
-                                                        if is_downloading {
-                                                            view! {
-                                                                <button
-                                                                    class="p-2 rounded-lg transition-all flex items-center justify-center"
-                                                                    style="background-color: transparent; color: var(--accent-secondary); opacity: 0.6; cursor: not-allowed;"
-                                                                    disabled=true
-                                                                    title="Downloading..."
-                                                                >
-                                                                    <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Default/>
-                                                                </button>
-                                                            }.into_any()
-                                                        } else {
-                                                            view! {
-                                                                <button
-                                                                    class="p-2 rounded-lg transition-all flex items-center justify-center hover:opacity-80 hover:scale-105"
-                                                                    style="background-color: transparent; color: var(--accent-secondary);"
-                                                                    on:click=move |_| handle_download(item_download_clone.clone())
-                                                                    title="Download"
-                                                                >
-                                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                                                    </svg>
-                                                                </button>
-                                                            }.into_any()
-                                                        }
-                                                    }}
-                                                    {move || {
-                                                        if has_magnet {
-                                                            let item_copy_btn = item_copy_for_magnet.clone();
-                                                            view! {
-                                                                <button
-                                                                    class="p-2 rounded-lg transition-all flex items-center justify-center hover:opacity-80 hover:scale-105"
-                                                                    style="background-color: transparent; color: var(--accent-secondary);"
-                                                                    on:click=move |_| {
-                                                                        handle_copy_magnet(item_copy_btn.clone());
+                                                        let (details, is_cached): (Vec<String>, bool) = match &item {
+                                                            SearchResultItem::Torrent(t) => {
+                                                                let cached = t.cached.unwrap_or(false);
+                                                                let d = if let Some(tpd) = &t.title_parsed_data {
+                                                                    let mut d = Vec::new();
+                                                                    if let Some(res) = &tpd.resolution {
+                                                                        d.push(res.clone());
                                                                     }
-                                                                    title="Copy Magnet Link"
-                                                                >
-                                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                                                                    </svg>
-                                                                </button>
-                                                            }.into_any()
-                                                        } else {
-                                                            view! {}.into_any()
+                                                                    if let Some(qual) = &tpd.quality {
+                                                                        d.push(qual.clone());
+                                                                    }
+                                                                    if let Some(codec) = &tpd.codec {
+                                                                        d.push(codec.clone());
+                                                                    }
+                                                                    if let Some(season) = tpd.season {
+                                                                        d.push(format!("S{:02}", season));
+                                                                    }
+                                                                    d
+                                                                } else {
+                                                                    Vec::new()
+                                                                };
+                                                                (d, cached)
+                                                            }
+                                                            SearchResultItem::Usenet(u) => {
+                                                                let cached = u.cached.unwrap_or(false);
+                                                                let d = if let Some(tpd) = &u.title_parsed_data {
+                                                                    let mut d = Vec::new();
+                                                                    if let Some(res) = &tpd.resolution {
+                                                                        d.push(res.clone());
+                                                                    }
+                                                                    if let Some(qual) = &tpd.quality {
+                                                                        d.push(qual.clone());
+                                                                    }
+                                                                    if let Some(codec) = &tpd.codec {
+                                                                        d.push(codec.clone());
+                                                                    }
+                                                                    if let Some(season) = tpd.season {
+                                                                        d.push(format!("S{:02}", season));
+                                                                    }
+                                                                    d
+                                                                } else {
+                                                                    Vec::new()
+                                                                };
+                                                                (d, cached)
+                                                            }
+                                                        };
+                                                        let has_details = !details.is_empty();
+                                                        let details_for_view = details.clone();
+                                                        let cached_for_view = is_cached;
+                                                        let has_magnet = item_magnet_check.magnet().is_some();
+                                                        let item_copy_for_magnet = item_copy_magnet.clone();
+                                                        
+                                                        view! {
+                                                            <tr
+                                                                class="border-b transition-colors hover:bg-opacity-5"
+                                                                style="border-color: var(--border-secondary);"
+                                                            >
+                                                                <td class="px-4 md:px-6 py-4" style="color: var(--text-primary);">
+                                                                    <div class="flex flex-col gap-2">
+                                                                        <div class="flex items-center gap-2 flex-wrap">
+                                                                            <span class="font-semibold text-sm sm:text-base leading-tight" style="color: var(--text-primary);">{item_title.title()}</span>
+                                                                            {move || {
+                                                                                match &item_title {
+                                                                                    SearchResultItem::Torrent(t) => {
+                                                                                        if t.private.unwrap_or(false) {
+                                                                                            view! {
+                                                                                                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Private Tracker" style="color: #f97316;">
+                                                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                                                                                </svg>
+                                                                                            }.into_any()
+                                                                                        } else {
+                                                                                            view! {}.into_any()
+                                                                                        }
+                                                                                    }
+                                                                                    SearchResultItem::Usenet(_) => view! {}.into_any(),
+                                                                                }
+                                                                            }}
+                                                                        </div>
+                                                                        <div class="flex flex-col gap-1.5">
+                                                                            <span class="text-xs sm:text-sm font-mono leading-relaxed" style="color: var(--text-secondary); opacity: 0.85; word-break: break-all;">
+                                                                                {move || {
+                                                                                    match &item_title_for_raw {
+                                                                                        SearchResultItem::Torrent(t) => t.raw_title.clone(),
+                                                                                        SearchResultItem::Usenet(u) => u.raw_title.clone(),
+                                                                                    }
+                                                                                }}
+                                                                            </span>
+                                                                            <Show when=move || has_details || cached_for_view>
+                                                                                <div class="flex gap-1.5 flex-wrap">
+                                                                                    {move || {
+                                                                                        if cached_for_view {
+                                                                                            view! {
+                                                                                                <div class="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3);" title="Cached - Ready to download instantly">
+                                                                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                                                                                    </svg>
+                                                                                                    <span>"Cached"</span>
+                                                                                                </div>
+                                                                                            }.into_any()
+                                                                                        } else {
+                                                                                            view! {}.into_any()
+                                                                                        }
+                                                                                    }}
+                                                                                    {details_for_view.iter().map(|d| {
+                                                                                        let d_clone = d.clone();
+                                                                                        view! {
+                                                                                            <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3);">
+                                                                                                {d_clone}
+                                                                                            </span>
+                                                                                        }
+                                                                                    }).collect::<Vec<_>>()}
+                                                                                </div>
+                                                                            </Show>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                                <td class="px-4 md:px-6 py-4 font-medium text-sm" style="color: var(--text-secondary);">
+                                                                    {format_size(item_size.size())}
+                                                                </td>
+                                                                <td class="px-4 md:px-6 py-4 font-medium text-sm hidden sm:table-cell" style="color: var(--text-secondary);">
+                                                                    {move || {
+                                                                        match &item_seeders {
+                                                                            SearchResultItem::Torrent(t) => {
+                                                                                t.last_known_seeders.map(|s| s.to_string()).unwrap_or_else(|| "-".to_string())
+                                                                            }
+                                                                            SearchResultItem::Usenet(_) => "-".to_string()
+                                                                        }
+                                                                    }}
+                                                                </td>
+                                                                <td class="px-4 md:px-6 py-4">
+                                                                    {move || match &item_type {
+                                                                        SearchResultItem::Torrent(_) => {
+                                                                            view! {
+                                                                                <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">
+                                                                                    "Torrent"
+                                                                                </span>
+                                                                            }.into_any()
+                                                                        }
+                                                                        SearchResultItem::Usenet(_) => {
+                                                                            view! {
+                                                                                <span class="px-2 py-1 rounded-md text-xs font-medium" style="background-color: rgba(168, 85, 247, 0.1); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">
+                                                                                    "Usenet"
+                                                                                </span>
+                                                                            }.into_any()
+                                                                        }
+                                                                    }}
+                                                                </td>
+                                                                <td class="px-4 md:px-6 py-4">
+                                                                    <div class="flex items-center gap-2">
+                                                                        {move || {
+                                                                            let item_hash_for_check = item_download.hash();
+                                                                            let is_downloading = downloading_items_clone.get().contains(&item_hash_for_check);
+                                                                            let item_download_clone = item_download.clone();
+                                                                            
+                                                                            if is_downloading {
+                                                                                view! {
+                                                                                    <button
+                                                                                        class="p-2 rounded-lg transition-all flex items-center justify-center"
+                                                                                        style="background-color: transparent; color: var(--accent-secondary); opacity: 0.6; cursor: not-allowed;"
+                                                                                        disabled=true
+                                                                                        title="Downloading..."
+                                                                                    >
+                                                                                        <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Default/>
+                                                                                    </button>
+                                                                                }.into_any()
+                                                                            } else {
+                                                                                view! {
+                                                                                    <button
+                                                                                        class="p-2 rounded-lg transition-all flex items-center justify-center hover:opacity-80 hover:scale-105"
+                                                                                        style="background-color: transparent; color: var(--accent-secondary);"
+                                                                                        on:click=move |_| handle_download_clone(item_download_clone.clone())
+                                                                                        title="Download"
+                                                                                    >
+                                                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                                                                        </svg>
+                                                                                    </button>
+                                                                                }.into_any()
+                                                                            }
+                                                                        }}
+                                                                        {move || {
+                                                                            if has_magnet {
+                                                                                let item_copy_btn = item_copy_for_magnet.clone();
+                                                                                view! {
+                                                                                    <button
+                                                                                        class="p-2 rounded-lg transition-all flex items-center justify-center hover:opacity-80 hover:scale-105"
+                                                                                        style="background-color: transparent; color: var(--accent-secondary);"
+                                                                                        on:click=move |_| {
+                                                                                            handle_copy_magnet_clone(item_copy_btn.clone());
+                                                                                        }
+                                                                                        title="Copy Magnet Link"
+                                                                                    >
+                                                                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                                                                        </svg>
+                                                                                    </button>
+                                                                                }.into_any()
+                                                                            } else {
+                                                                                view! {}.into_any()
+                                                                            }
+                                                                        }}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
                                                         }
-                                                    }}
-                                                </div>
-                                            </td>
-                                        </tr>
+                                                    }).collect::<Vec<_>>()
+                                                } else {
+                                                    Vec::new()
+                                                }
+                                            }}
+                                        </>
                                     }
                                 }).collect::<Vec<_>>()
                             }}
-                            </tbody>
+                        </tbody>
                         </table>
                     </div>
                 </div>
