@@ -1,10 +1,7 @@
 services:
   torbox-companion:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/crazycacti/torbox-companion:latest
     container_name: torbox-companion
     restart: unless-stopped
     ports:
       - "3000:3000"
-
