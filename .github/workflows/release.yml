@@ -126,6 +126,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     if: needs.build.result == 'success'
     steps:
       - name: Checkout repository
@@ -176,7 +177,6 @@ jobs:
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@$(find . -name "linux-amd64.digest" -type f | head -1 | xargs cat)
-          subject-type: container
           push-to-registry: true
 
   release:
