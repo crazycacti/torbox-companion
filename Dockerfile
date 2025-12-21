@@ -5,6 +5,7 @@ ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
 ARG TARGETARCH
+ARG TARGETPLATFORM
 
 # Install system dependencies in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -59,23 +60,16 @@ ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
 ENV LEPTOS_ENV=PROD
 ENV RUST_BACKTRACE=1
 
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "ARM64 detected, disabling wasm-opt in Cargo.toml" && \
-        if ! grep -q "^wasm-opt = false" Cargo.toml; then \
-            awk '/^\[package\.metadata\.leptos\]/ { print; print "wasm-opt = false"; next } { print }' Cargo.toml > Cargo.toml.tmp && \
-            mv Cargo.toml.tmp Cargo.toml; \
-        fi && \
-        echo "Also creating wasm-opt wrapper as fallback" && \
-        mkdir -p ~/.cargo/bin && \
-        printf "#!/bin/sh\nfor arg in \"\\\$@\"; do\n  if [ \"\\\$arg\" = \"-o\" ]; then OUTPUT_NEXT=1\n  elif [ \"\\\$OUTPUT_NEXT\" = \"1\" ]; then OUTPUT=\"\\\$arg\"; OUTPUT_NEXT=0\n  elif [ -z \"\\\$INPUT\" ] && [ -f \"\\\$arg\" ]; then INPUT=\"\\\$arg\"\n  fi\ndone\n[ -n \"\\\$OUTPUT\" ] && [ -n \"\\\$INPUT\" ] && cp \"\\\$INPUT\" \"\\\$OUTPUT\"\nexit 0\n" > ~/.cargo/bin/wasm-opt && \
-        chmod +x ~/.cargo/bin/wasm-opt; \
-    fi
-
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/app/target \
-    sh -c 'if [ "$TARGETARCH" = "arm64" ]; then export PATH="$HOME/.cargo/bin:$PATH"; fi && \
-    CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release && \
+    sh -c 'if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "ARM64 detected, disabling wasm-opt optimization"; \
+        LEPTOS_WASM_OPT=false CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release; \
+    else \
+        echo "AMD64 detected, using wasm-opt optimization"; \
+        CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release; \
+    fi && \
     if [ ! -f target/site/pkg/torbox-companion.wasm ]; then \
         echo "ERROR: WASM file not found"; \
         exit 1; \

@@ -1,17 +1,11 @@
-//! Example usage of the TorBox API Manager
-//! This file demonstrates how to use every single API endpoint
-
 use crate::api::*;
 use crate::api::types::*;
 
-/// Example: Complete API workflow demonstration
 pub async fn complete_api_workflow_example(api_key: String) -> Result<(), ApiError> {
  println!("Starting complete TorBox API workflow demonstration...");
  
- // Initialize the request handler
  let mut handler = create_handler(api_key);
  
- // Test API connection
  println!("Testing API connection...");
  match handler.test_connection().await {
  Ok(true) => println!("API connection successful!"),
@@ -25,58 +19,44 @@ pub async fn complete_api_workflow_example(api_key: String) -> Result<(), ApiErr
  }
  }
 
- // ===== USER MANAGEMENT EXAMPLES =====
  println!("\n USER MANAGEMENT EXAMPLES");
  
- // Get user information
  let user = handler.get_user_info(true).await?;
  println!("User info retrieved: {}", user.email);
  
- // Get subscriptions
  let subscriptions = handler.get_subscriptions().await?;
  println!(" Subscriptions retrieved");
  
- // Get transactions
  let transactions = handler.get_transactions().await?;
  println!(" Transactions retrieved");
  
- // Get referral data
  let referral_data = handler.get_referral_data().await?;
  println!(" Referral data retrieved");
 
- // ===== SEARCH API EXAMPLES =====
  println!("\n SEARCH API EXAMPLES");
  
- // Search for metadata
  let search_results = handler.search_metadata("Star Wars".to_string()).await?;
  println!(" Found {} search results", search_results.len());
  
- // Get specific metadata
  if let Some(result) = search_results.first() {
  let metadata = handler.get_metadata("imdb".to_string(), result.id.clone()).await?;
  println!(" Metadata retrieved: {}", metadata.title);
  }
  
- // Search for torrents
  let torrent_search = handler.search_torrents("linux".to_string()).await?;
  println!(" Found {} torrents", torrent_search.len());
  
- // Search for usenet posts
  let usenet_search = handler.search_usenet("software".to_string()).await?;
  println!(" Found {} usenet posts", usenet_search.len());
 
- // ===== TORRENT MANAGEMENT EXAMPLES =====
  println!("\n TORRENT MANAGEMENT EXAMPLES");
  
- // Get torrent list
  let torrents = handler.get_torrent_list(None, None, Some(0), Some(10)).await?;
  println!(" Retrieved {} torrents", torrents.len());
  
- // Get queued torrents
  let queued_torrents = handler.get_queued_torrents().await?;
  println!(" Retrieved {} queued torrents", queued_torrents.len());
  
- // Example: Create a torrent (commented out to avoid actual creation)
  /*
  let create_request = CreateTorrentRequest {
  file: None,
@@ -91,14 +71,11 @@ pub async fn complete_api_workflow_example(api_key: String) -> Result<(), ApiErr
  println!(" Torrent created: {:?}", new_torrent);
  */
 
- // ===== WEB DOWNLOAD EXAMPLES =====
  println!("\n WEB DOWNLOAD EXAMPLES");
  
- // Get web download list
  let web_downloads = handler.get_web_download_list(None, None, Some(0), Some(10)).await?;
  println!(" Retrieved {} web downloads", web_downloads.len());
  
- // Example: Create web download (commented out to avoid actual creation)
  /*
  let web_request = CreateWebDownloadRequest {
  link: "https://example.com/file.zip".to_string(),
@@ -111,21 +88,16 @@ pub async fn complete_api_workflow_example(api_key: String) -> Result<(), ApiErr
  println!(" Web download created: {:?}", new_web_download);
  */
 
- // ===== USENET DOWNLOAD EXAMPLES =====
  println!("\n USENET DOWNLOAD EXAMPLES");
  
- // Get usenet download list
  let usenet_downloads = handler.get_usenet_download_list(None, None, Some(0), Some(10)).await?;
  println!(" Retrieved {} usenet downloads", usenet_downloads.len());
 
- // ===== RSS FEED EXAMPLES =====
  println!("\n RSS FEED EXAMPLES");
  
- // Get RSS feeds
  let rss_feeds = handler.get_rss_feeds(None).await?;
  println!(" Retrieved {} RSS feeds", rss_feeds.len());
  
- // Example: Add RSS feed (commented out to avoid actual creation)
  /*
  let rss_request = CreateRssFeedRequest {
  url: "https://example.com/rss".to_string(),
@@ -142,10 +114,8 @@ pub async fn complete_api_workflow_example(api_key: String) -> Result<(), ApiErr
  println!(" RSS feed added: {:?}", new_rss_feed);
  */
 
- // ===== STREAMING EXAMPLES =====
  println!("\n STREAMING EXAMPLES");
  
- // Example: Create stream (commented out to avoid actual creation)
  /*
  let stream_request = CreateStreamRequest {
  id: 123,
@@ -158,30 +128,23 @@ pub async fn complete_api_workflow_example(api_key: String) -> Result<(), ApiErr
  println!(" Stream created: {}", stream.stream_url);
  */
 
- // ===== NOTIFICATION EXAMPLES =====
  println!("\n NOTIFICATION EXAMPLES");
  
- // Get notifications
  let notifications = handler.get_notifications().await?;
  println!(" Retrieved {} notifications", notifications.len());
  
- // Test notification (commented out to avoid spam)
  /*
  let test_result = handler.test_notification().await?;
  println!(" Test notification sent: {}", test_result);
  */
 
- // ===== RELAY API EXAMPLES =====
  println!("\n RELAY API EXAMPLES");
  
- // Get relay status
  let relay_status = handler.get_relay_status().await?;
  println!(" Relay status: {} users online", relay_status.data.current_online);
 
- // ===== INTEGRATION EXAMPLES =====
  println!("\n INTEGRATION EXAMPLES");
  
- // Get transfer jobs
  let transfer_jobs = handler.get_transfer_jobs().await?;
  println!(" Retrieved {} transfer jobs", transfer_jobs.len());
 
@@ -189,22 +152,18 @@ pub async fn complete_api_workflow_example(api_key: String) -> Result<(), ApiErr
  Ok(())
 }
 
-/// Example: Torrent management workflow
 pub async fn torrent_management_example(api_key: String) -> Result<(), ApiError> {
  println!(" Torrent Management Example");
  
  let handler = create_handler(api_key);
  
- // Get all torrents
  let torrents = handler.get_torrent_list(None, None, Some(0), Some(100)).await?;
  println!("Found {} torrents", torrents.len());
  
- // Process each torrent
  for torrent in &torrents {
  println!("Torrent: {} - Status: {} - Progress: {:.1}%", 
- torrent.name, torrent.download_state, torrent.progress);
+  torrent.name, torrent.download_state, torrent.progress);
  
- // Example operations based on status
  match torrent.download_state.as_str() {
  "completed" => {
  println!(" → Torrent completed, ready for download");
@@ -227,27 +186,23 @@ pub async fn torrent_management_example(api_key: String) -> Result<(), ApiError>
  Ok(())
 }
 
-/// Example: Search and download workflow
 pub async fn search_and_download_example(api_key: String, search_query: String) -> Result<(), ApiError> {
  println!(" Search and Download Example");
  
  let handler = create_handler(api_key);
  
- // Search for content
  let search_results = handler.search_metadata(search_query.clone()).await?;
  println!("Found {} results for '{}'", search_results.len(), search_query);
  
  if let Some(result) = search_results.first() {
  println!("Selected: {}", result.title);
  
- // Search for torrents related to this content
  let torrent_results = handler.search_torrents(result.title.clone()).await?;
  println!("Found {} torrents for {}", torrent_results.len(), result.title);
  
  if let Some(torrent) = torrent_results.first() {
      println!("Selected torrent: {} ({} MB)", torrent.title, torrent.size / 1024 / 1024);
  
- // Example: Create torrent (commented out to avoid actual creation)
  /*
  let create_request = CreateTorrentRequest {
      file: None,
@@ -268,13 +223,11 @@ pub async fn search_and_download_example(api_key: String, search_query: String) 
  Ok(())
 }
 
-/// Example: RSS feed automation
 pub async fn rss_automation_example(api_key: String) -> Result<(), ApiError> {
  println!(" RSS Automation Example");
  
  let handler = create_handler(api_key);
  
- // Get all RSS feeds
  let rss_feeds = handler.get_rss_feeds(None).await?;
  println!("Found {} RSS feeds", rss_feeds.len());
  
@@ -290,13 +243,11 @@ pub async fn rss_automation_example(api_key: String) -> Result<(), ApiError> {
  Ok(())
 }
 
-/// Example: Cloud integration workflow
 pub async fn cloud_integration_example(api_key: String) -> Result<(), ApiError> {
  println!(" Cloud Integration Example");
  
  let handler = create_handler(api_key);
  
- // Get transfer jobs
  let transfer_jobs = handler.get_transfer_jobs().await?;
  println!("Found {} active transfer jobs", transfer_jobs.len());
  
@@ -310,13 +261,11 @@ pub async fn cloud_integration_example(api_key: String) -> Result<(), ApiError> 
  Ok(())
 }
 
-/// Example: Notification management
 pub async fn notification_management_example(api_key: String) -> Result<(), ApiError> {
  println!(" Notification Management Example");
  
  let handler = create_handler(api_key);
  
- // Get notifications
  let notifications = handler.get_notifications().await?;
  println!("Found {} notifications", notifications.len());
  
@@ -327,10 +276,9 @@ pub async fn notification_management_example(api_key: String) -> Result<(), ApiE
  let status = if notification.read { "read" } else { "unread" };
  println!("[{}] {}: {}", status, notification.r#type, notification.title);
  println!(" → {}", notification.message);
- println!(" → {}", notification.created_at);
+  println!(" → {}", notification.created_at);
  }
  
- // Clear old notifications (commented out to avoid actual clearing)
  /*
  if unread_count > 10 {
  let result = handler.clear_all_notifications().await?;
@@ -341,13 +289,11 @@ pub async fn notification_management_example(api_key: String) -> Result<(), ApiE
  Ok(())
 }
 
-/// Example: Complete dashboard data
 pub async fn dashboard_data_example(api_key: String) -> Result<DashboardData, ApiError> {
  println!(" Dashboard Data Example");
  
  let handler = create_handler(api_key);
  
- // Gather all dashboard data
  let user = handler.get_user_info(true).await?;
  let torrents = handler.get_torrent_list(None, None, Some(0), Some(10)).await?;
  let web_downloads = handler.get_web_download_list(None, None, Some(0), Some(10)).await?;
@@ -379,7 +325,6 @@ pub async fn dashboard_data_example(api_key: String) -> Result<DashboardData, Ap
  Ok(dashboard)
 }
 
-/// Dashboard data structure
 #[derive(Debug, Clone)]
 pub struct DashboardData {
  pub user: User,

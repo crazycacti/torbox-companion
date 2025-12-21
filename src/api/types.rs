@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize, Deserializer};
 
-// Helper to deserialize categories that might be an array or single value
 fn deserialize_categories<'de, D>(deserializer: D) -> Result<Option<Vec<serde_json::Value>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -14,7 +13,6 @@ where
     }
 }
 
-// Helper to deserialize files that might be an integer, array, or object
 fn deserialize_files<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
 where
     D: Deserializer<'de>,
@@ -26,7 +24,6 @@ where
     }
 }
 
-// Helper to deserialize optional integers that might come as strings or numbers
 fn deserialize_optional_int<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
     D: Deserializer<'de>,
@@ -45,7 +42,6 @@ where
     }
 }
 
-// Helper to deserialize size that might come as a string or number (for custom indexers)
 fn deserialize_size<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: Deserializer<'de>,
@@ -65,7 +61,6 @@ where
     }
 }
 
-// Base API Response Structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
@@ -74,7 +69,6 @@ pub struct ApiResponse<T> {
     pub data: Option<T>,
 }
 
-// Search API Response Structure (different format - uses "message" instead of "detail", no "error")
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchApiResponse<T> {
     pub success: bool,
@@ -84,7 +78,6 @@ pub struct SearchApiResponse<T> {
     pub data: Option<T>,
 }
 
-// User Management Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     pub id: i32,
@@ -134,7 +127,6 @@ pub struct NotificationSettings {
     pub push: bool,
 }
 
-// Torrent Management Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Torrent {
     pub id: i32,
@@ -204,7 +196,6 @@ pub struct CreateTorrentRequest {
     pub add_only_if_cached: Option<bool>,
 }
 
-// Web Download Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebDownload {
     pub id: i32,
@@ -235,7 +226,6 @@ pub struct CreateWebDownloadRequest {
     pub add_only_if_cached: Option<bool>,
 }
 
-// Usenet Download Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsenetDownload {
     pub id: i32,
@@ -290,7 +280,6 @@ pub struct CreateUsenetDownloadRequest {
     pub add_only_if_cached: Option<bool>,
 }
 
-// RSS Feed Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RssFeed {
     pub id: i32,
@@ -318,7 +307,6 @@ pub struct CreateRssFeedRequest {
     pub torrent_seeding: i32,
 }
 
-// Streaming Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stream {
     #[serde(default, alias = "token")]
@@ -369,7 +357,6 @@ pub struct CreateStreamRequest {
     pub chosen_audio_index: Option<i32>,
 }
 
-// Search API Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchMetadata {
     #[serde(rename = "globalID")]
@@ -507,7 +494,6 @@ pub struct SearchUsenetResponse {
     pub total_nzbs: i32,
 }
 
-// Relay API Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayStatus {
     pub status: String,
@@ -522,7 +508,6 @@ pub struct RelayData {
     pub worker_count: Option<i32>,
 }
 
-// Integration Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudUpload {
     pub id: i32,
@@ -542,7 +527,6 @@ pub struct TransferJob {
     pub created_at: String,
 }
 
-// Notification Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Notification {
     pub id: String,
@@ -553,7 +537,6 @@ pub struct Notification {
     pub read: bool,
 }
 
-// Vendor Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VendorAccount {
     pub vendor_name: String,
@@ -568,7 +551,6 @@ pub struct VendorUser {
     pub created_at: String,
 }
 
-// Error Types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ApiError {
     AuthenticationError,
@@ -596,7 +578,6 @@ impl std::fmt::Display for ApiError {
     }
 }
 
-// Request/Response wrapper types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaginatedResponse<T> {
     pub items: Vec<T>,
