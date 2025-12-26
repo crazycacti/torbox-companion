@@ -3,3 +3,5 @@ pub mod search;
 pub mod loading_spinner;
 pub mod network_activity_chart;
 pub mod upload;
+
+pub use downloads_table::{DownloadItem, DownloadFile, DownloadType};

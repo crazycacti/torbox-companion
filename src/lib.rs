@@ -6,6 +6,7 @@ pub mod landing_page;
 pub mod dashboard;
 pub mod themes;
 pub mod stream_page;
+pub mod notifications;
 
 #[cfg(feature = "ssr")]
 pub mod logging;

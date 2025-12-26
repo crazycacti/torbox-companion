@@ -2,7 +2,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 #[cfg(target_arch = "wasm32")]
 use web_sys;
-use crate::api::{TorboxClient, ApiError};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen;
+use crate::api::{RequestHandler, ApiError};
+use crate::notifications::use_notification;
 
 #[component]
 pub fn LandingPage() -> impl IntoView {
@@ -10,6 +13,7 @@ pub fn LandingPage() -> impl IntoView {
     let show_key = RwSignal::new(false);
     let is_connecting = RwSignal::new(false);
     let error_message = RwSignal::new(String::new());
+    let notifications = use_notification();
     
     let stored_api_key = RwSignal::new(String::new());
     #[cfg(target_arch = "wasm32")]
@@ -32,30 +36,76 @@ pub fn LandingPage() -> impl IntoView {
         show_key.update(|show| *show = !*show);
     };
 
+    let notifications_clone = notifications.clone();
+    let is_connecting_clone = is_connecting.clone();
+    let error_message_clone = error_message.clone();
     let connect_to_api = move |_| {
         let key = api_key.get();
+        let notifications_for_check = notifications_clone.clone();
+        let error_message_for_check = error_message_clone.clone();
         if key.is_empty() {
-            error_message.set("Please enter your API key".to_string());
+            error_message_for_check.set("Invalid Key".to_string());
+            notifications_for_check.error("Please enter your API key".to_string());
             return;
         }
 
-        is_connecting.set(true);
-        error_message.set(String::new());
+        // Clear any previous error messages
+        error_message_for_check.set(String::new());
+        is_connecting_clone.set(true);
         
+        let notifications_for_async = notifications_clone.clone();
+        let is_connecting_for_async = is_connecting_clone.clone();
+        let error_message_for_async = error_message_clone.clone();
         spawn_local(async move {
             #[cfg(target_arch = "wasm32")]
             {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        let _ = storage.set_item("api_key", &key);
+                let is_connecting_local = is_connecting_for_async.clone();
+                let notifications_local = notifications_for_async.clone();
+                let error_message_local = error_message_for_async.clone();
+                
+                // Validate API key before redirecting
+                let handler = RequestHandler::new(key.clone());
+                match handler.test_connection().await {
+                    Ok(true) => {
+                        // API key is valid, proceed with saving and navigation
+                        if let Some(window) = web_sys::window() {
+                            // Save API key to storage
+                            if let Ok(Some(storage)) = window.local_storage() {
+                                if let Err(_) = storage.set_item("api_key", &key) {
+                                    notifications_local.warning("Failed to save API key to storage".to_string());
+                                }
+                            }
+                            // Navigate to dashboard
+                            window.location().set_href("/dashboard");
+                        } else {
+                            is_connecting_local.set(false);
+                            error_message_local.set("Invalid Key".to_string());
+                            notifications_local.error("Failed to access window".to_string());
+                        }
                     }
-                    let _ = window.location().set_href("/dashboard");
+                    Ok(false) => {
+                        // API key is invalid
+                        is_connecting_local.set(false);
+                        error_message_local.set("Invalid Key".to_string());
+                        notifications_local.error("Invalid API key. Please check your key and try again.".to_string());
+                    }
+                    Err(e) => {
+                        // Network or other error
+                        is_connecting_local.set(false);
+                        error_message_local.set("Invalid Key".to_string());
+                        let error_msg = match e {
+                            ApiError::NetworkError => "Network error. Please check your connection and try again.".to_string(),
+                            ApiError::ServerError => "Server error. Please try again later.".to_string(),
+                            _ => format!("Failed to validate API key: {}", e),
+                        };
+                        notifications_local.error(error_msg);
+                    }
                 }
             }
-            
             #[cfg(not(target_arch = "wasm32"))]
             {
-                error_message.set("Processing...".to_string());
+                is_connecting_for_async.set(false);
+                error_message_for_async.set(String::new());
             }
         });
     };
@@ -77,8 +127,10 @@ pub fn LandingPage() -> impl IntoView {
                     <p class="text-slate-300 text-sm sm:text-base mb-4 sm:mb-6">"Enter your API key to begin managing your connections"</p>
                     
                     <Show when=move || !error_message.get().is_empty()>
-                        <div class="mb-4 p-3 bg-red-900/20 border border-red-500/30 rounded-lg text-red-300 text-sm">
-                            {move || error_message.get()}
+                        <div class="mb-4 text-center">
+                            <p class="font-bold text-lg" style="color: var(--error) !important; animation: fadeIn 0.3s ease-out;">
+                                {move || error_message.get()}
+                            </p>
                         </div>
                     </Show>
                     
@@ -123,7 +175,7 @@ pub fn LandingPage() -> impl IntoView {
 
                     <button
                         class=move || {
-                            let base = "w-full font-medium py-2.5 sm:py-3 px-4 rounded-lg mb-3 sm:mb-4 text-sm sm:text-base";
+                            let base = "w-full font-medium py-2.5 sm:py-3 px-4 rounded-lg mb-6 sm:mb-8 text-sm sm:text-base";
                             if is_connecting.get() || api_key.get().is_empty() {
                                 format!("{} bg-gray-500 text-gray-300 cursor-not-allowed", base)
                             } else {
@@ -179,11 +231,3 @@ pub fn LandingPage() -> impl IntoView {
     }
 }
 
-async fn validate_api_key(api_key: &str) -> Result<bool, ApiError> {
-    let client = TorboxClient::new(api_key.to_string());
-    match client.get_user(None).await {
-        Ok(_) => Ok(true),
-        Err(ApiError::AuthenticationError) => Ok(false),
-        Err(e) => Err(e),
-    }
-}

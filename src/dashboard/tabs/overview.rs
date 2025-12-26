@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use crate::dashboard::components::downloads_table::{DownloadsTable, DownloadItem};
+use crate::dashboard::components::downloads_table::{DownloadItem, DownloadsTable};
 use crate::dashboard::components::search::SearchComponent;
 use crate::dashboard::components::network_activity_chart::NetworkActivityChart;
 use crate::dashboard::components::upload::UploadComponent;

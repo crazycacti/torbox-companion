@@ -115,7 +115,6 @@ body {
     text-align: right;
 }
 
-/* Ensure action buttons are properly aligned */
 .actions-container {
     display: flex;
     align-items: center;
@@ -945,7 +944,6 @@ a:hover {
     min-width: 2px;
 }
 
-/* Ensure progress bar displays correctly */
 .w-full {
     width: 100%;
 }
@@ -954,13 +952,11 @@ a:hover {
     overflow: hidden;
 }
 
-/* Force progress bar to display properly */
 div[style*="width:"] {
     display: block !important;
     position: relative !important;
 }
 
-/* Ensure progress bar fill is visible */
 .h-full.rounded-full {
     display: block;
     position: relative;
@@ -1196,7 +1192,6 @@ select option {
     animation: spin 0.8s linear infinite;
 }
 
-/* Optimized spinner for better performance */
 .animate-spin {
     will-change: transform;
     backface-visibility: hidden;
@@ -1210,7 +1205,7 @@ select option {
         transition-duration: 0.01ms !important;
     }
     
-    /* Alternative: pulsing animation for reduced motion users */
+    /* Alternative: pulsing animation */
     .animate-spin {
         animation: pulse 2s ease-in-out infinite;
     }
@@ -1222,6 +1217,81 @@ select option {
     }
     50% {
         opacity: 0.5;
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.animate-slide-in-right {
+    animation: slideInRight 0.3s ease-out;
+}
+
+/* Toast Notification Styles */
+.notification-toast {
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-secondary);
+    transition: all 0.2s ease-in-out;
+    min-width: 300px;
+    max-width: 400px;
+}
+
+.notification-toast:hover {
+    box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.4), 0 10px 15px -6px rgba(0, 0, 0, 0.3);
+    transform: translateY(-1px);
+}
+
+.notification-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.notification-message {
+    line-height: 1.5;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.notification-close {
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    padding: 2px;
+}
+
+.notification-close:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Confirmation Modal Styles */
+.modal-content {
+    animation: modalFadeIn 0.2s ease-out;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
     }
 }
 

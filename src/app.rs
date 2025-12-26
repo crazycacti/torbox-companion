@@ -8,6 +8,7 @@ use leptos_router::{
 use crate::landing_page::LandingPage;
 use crate::dashboard::MainDashboard;
 use crate::stream_page::StreamPage;
+use crate::notifications::{NotificationContext, NotificationContainer, ConfirmationModal, ConfirmationModalState};
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -104,6 +105,10 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
+    
+    let notification_context = NotificationContext::new();
+    provide_context(notification_context.clone());
+    provide_context(RwSignal::new(ConfirmationModalState::default()));
 
     view! {
         <Stylesheet id="leptos" href="/pkg/torbox-companion.css"/>
@@ -118,5 +123,8 @@ pub fn App() -> impl IntoView {
                 </Routes>
             </main>
         </Router>
+        
+        <NotificationContainer/>
+        <ConfirmationModal />
     }
 }

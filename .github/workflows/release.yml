@@ -208,7 +208,7 @@ jobs:
             
             ### Docker Images
             
-            Multi-architecture Docker images are available on GitHub Container Registry:
+            Docker images are available on GitHub Container Registry:
             
             ```bash
             # Pull the latest version

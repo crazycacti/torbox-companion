@@ -7,12 +7,14 @@ use web_sys;
 use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 use js_sys;
-use crate::api::{TorboxClient, Torrent, WebDownload, UsenetDownload};
+use crate::api::{TorboxClient, Torrent, WebDownload, UsenetDownload, format_api_error};
 use crate::dashboard::DashboardContext;
 use crate::dashboard::components::loading_spinner::{LoadingSpinner, SpinnerSize, SpinnerVariant};
+use crate::notifications::{use_notification, use_confirmation, show_confirmation, ConfirmationVariant};
 use chrono::DateTime;
 use serde::{Serialize, Deserialize};
 use std::collections::{HashSet, HashMap};
+use std::rc::Rc;
 use futures;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -876,6 +878,8 @@ pub fn DownloadsTable(
         .expect("DashboardContext should be provided by MainDashboard");
     let user_data = context.user_data;
     let user_loading = context.user_loading;
+    let notifications = use_notification();
+    let confirmation_state = use_confirmation();
     
     let downloads = downloads_signal;
     let loading = RwSignal::new(false);
@@ -889,12 +893,40 @@ pub fn DownloadsTable(
     #[cfg(target_arch = "wasm32")]
     {
         let selection_state_clone = selection_state.clone();
+        let downloads_clone = downloads.clone();
         spawn_local(async move {
             let loaded_state = SelectionState::load_from_storage();
-            selection_state_clone.set(loaded_state);
+            let mut state = loaded_state;
+            let current_downloads = downloads_clone.get();
+            let valid_ids: HashSet<i32> = current_downloads.iter().map(|d| d.id).collect();
+            state.selected_items.retain(|id| valid_ids.contains(id));
+            state.selected_files.retain(|item_id, _| valid_ids.contains(item_id));
+            if state.selected_items.is_empty() && state.selected_files.is_empty() {
+                state.clear();
+            } else {
+                state.save_to_storage();
+            }
+            selection_state_clone.set(state);
         });
     }
     let show_bulk_actions = RwSignal::new(false);
+    
+    Effect::new(move |_| {
+        let current_downloads = downloads.get();
+        let valid_ids: HashSet<i32> = current_downloads.iter().map(|d| d.id).collect();
+        selection_state.update(|state| {
+            let had_selections = !state.selected_items.is_empty() || !state.selected_files.is_empty();
+            state.selected_items.retain(|id| valid_ids.contains(id));
+            state.selected_files.retain(|item_id, _| valid_ids.contains(item_id));
+            let has_selections = !state.selected_items.is_empty() || !state.selected_files.is_empty();
+            if had_selections && !has_selections {
+                state.clear();
+                state.save_to_storage();
+            } else if had_selections {
+                state.save_to_storage();
+            }
+        });
+    });
     
     let action_loading = RwSignal::new(std::collections::HashMap::<i32, String>::new()); 
     let bulk_download_loading = RwSignal::new(false);
@@ -969,15 +1001,22 @@ pub fn DownloadsTable(
         }
     };
 
-    let fetch_downloads = move || {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let loading_clone = loading.clone();
-            let error_clone = error.clone();
-            let warnings_clone = warnings.clone();
-            let downloads_clone = downloads.clone();
-            
-            spawn_local(async move {
+    let fetch_downloads = {
+        let notifications_clone = notifications.clone();
+        let loading_clone = loading.clone();
+        let error_clone = error.clone();
+        let warnings_clone = warnings.clone();
+        let downloads_clone = downloads.clone();
+        move || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let loading_local = loading_clone.clone();
+                let error_local = error_clone.clone();
+                let warnings_local = warnings_clone.clone();
+                let downloads_local = downloads_clone.clone();
+                let notifications_local = notifications_clone.clone();
+                
+                spawn_local(async move {
                 use wasm_bindgen_futures::JsFuture;
                 use web_sys::js_sys::Promise;
                 
@@ -1009,9 +1048,9 @@ pub fn DownloadsTable(
                 #[cfg(not(target_arch = "wasm32"))]
                 let load_start_time = 0.0;
                 
-                loading_clone.set(true);
-                error_clone.set(None);
-                warnings_clone.set(Vec::new());
+                loading_local.set(true);
+                error_local.set(None);
+                warnings_local.set(Vec::new());
                 
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
@@ -1076,8 +1115,9 @@ pub fn DownloadsTable(
                                         }
                                     }
                                     Err(e) => {
+                                        let error_msg = format_api_error(&e);
                                         log!("Web download API error: {:?}", e);
-                                        api_errors.push(format!("Failed to fetch web downloads: {}", e));
+                                        api_errors.push(format!("Failed to fetch web downloads: {}", error_msg));
                                     }
                                 }
                                 
@@ -1097,8 +1137,9 @@ pub fn DownloadsTable(
                                         }
                                     }
                                     Err(e) => {
+                                        let error_msg = format_api_error(&e);
                                         log!("Usenet API error: {:?}", e);
-                                        api_errors.push(format!("Failed to fetch usenet downloads: {}", e));
+                                        api_errors.push(format!("Failed to fetch usenet downloads: {}", error_msg));
                                     }
                                 }
                                 
@@ -1131,8 +1172,9 @@ pub fn DownloadsTable(
                                         }
                                     }
                                     Err(e) => {
+                                        let error_msg = format_api_error(&e);
                                         log!("Queued torrents API error: {:?}", e);
-                                        api_errors.push(format!("Failed to fetch queued torrents: {}", e));
+                                        api_errors.push(format!("Failed to fetch queued torrents: {}", error_msg));
                                     }
                                 }
                                 
@@ -1164,8 +1206,9 @@ pub fn DownloadsTable(
                                         }
                                     }
                                     Err(e) => {
+                                        let error_msg = format_api_error(&e);
                                         log!("Queued usenet API error: {:?}", e);
-                                        api_errors.push(format!("Failed to fetch queued usenet downloads: {}", e));
+                                        api_errors.push(format!("Failed to fetch queued usenet downloads: {}", error_msg));
                                     }
                                 }
                                 
@@ -1197,16 +1240,24 @@ pub fn DownloadsTable(
                                         }
                                     }
                                     Err(e) => {
+                                        let error_msg = format_api_error(&e);
                                         log!("Queued web downloads API error: {:?}", e);
-                                        api_errors.push(format!("Failed to fetch queued web downloads: {}", e));
+                                        api_errors.push(format!("Failed to fetch queued web downloads: {}", error_msg));
                                     }
                                 }
                                 
-                                if !api_errors.is_empty() && all_downloads.is_empty() {
-                                    error_clone.set(Some(api_errors.join("; ")));
-                                } else if !api_errors.is_empty() {
-                                    warnings_clone.set(api_errors);
-                                    log!("Partial API failures: {}", warnings_clone.get().join("; "));
+                                if !api_errors.is_empty() {
+                                    if all_downloads.is_empty() {
+                                        let error_msg = api_errors.join("; ");
+                                        error_local.set(Some(error_msg.clone()));
+                                        notifications_local.error(format!("Failed to fetch downloads: {}", error_msg));
+                                    } else {
+                                        warnings_local.set(api_errors.clone());
+                                        for error_msg in api_errors {
+                                            notifications_local.warning(error_msg);
+                                        }
+                                        log!("Partial API failures: {}", warnings_local.get().join("; "));
+                                    }
                                 }
                                 
                                 #[cfg(target_arch = "wasm32")]
@@ -1224,8 +1275,8 @@ pub fn DownloadsTable(
                                     
                                     let render_start_time = js_sys::Date::now();
                                     
-                                    downloads_clone.set(all_downloads);
-                                    loading_clone.set(false);
+                                    downloads_local.set(all_downloads);
+                                    loading_local.set(false);
                                     
                                     yield_to_browser().await;
                                     yield_microtask().await;
@@ -1245,33 +1296,35 @@ pub fn DownloadsTable(
                                 }
                                 #[cfg(not(target_arch = "wasm32"))]
                                 {
-                                    downloads_clone.set(all_downloads);
-                                    loading_clone.set(false);
+                                    downloads_local.set(all_downloads);
+                                    loading_local.set(false);
                                 }
                             } else {
-                                error_clone.set(Some("No API key found".to_string()));
-                                loading_clone.set(false);
+                                error_local.set(Some("No API key found".to_string()));
+                                loading_local.set(false);
                             }
                         } else {
-                            error_clone.set(Some("Failed to access localStorage".to_string()));
-                            loading_clone.set(false);
+                            error_local.set(Some("Failed to access localStorage".to_string()));
+                            loading_local.set(false);
                         }
                     } else {
-                        error_clone.set(Some("Failed to access localStorage".to_string()));
-                        loading_clone.set(false);
+                        error_local.set(Some("Failed to access localStorage".to_string()));
+                        loading_local.set(false);
                     }
                 } else {
-                    error_clone.set(Some("Failed to access window".to_string()));
-                    loading_clone.set(false);
+                    error_local.set(Some("Failed to access window".to_string()));
+                    notifications_local.error("Failed to access window".to_string());
+                    loading_local.set(false);
                 }
-            });
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            loading.set(true);
-            error.set(None);
-            warnings.set(Vec::new());
-            loading.set(false);
+                });
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                loading_clone.set(true);
+                error_clone.set(None);
+                warnings_clone.set(Vec::new());
+                loading_clone.set(false);
+            }
         }
     };
 
@@ -1718,10 +1771,10 @@ pub fn DownloadsTable(
     });
 
     let toggle_item_selection = move |item_id: i32| {
-        let mut state = selection_state.get();
-        state.toggle_item(item_id);
-        state.save_to_storage();
-        selection_state.set(state);
+        selection_state.update(|state| {
+            state.toggle_item(item_id);
+            state.save_to_storage();
+        });
         
         let new_state = selection_state.get();
         show_bulk_actions.set(new_state.has_selected_items() || new_state.has_selected_files());
@@ -1729,20 +1782,20 @@ pub fn DownloadsTable(
 
     let toggle_select_all = move || {
         let filtered = filtered_downloads.get();
-        let mut state = selection_state.get();
-        state.toggle_all_items(&filtered);
-        state.save_to_storage();
-        selection_state.set(state);
+        selection_state.update(|state| {
+            state.toggle_all_items(&filtered);
+            state.save_to_storage();
+        });
         
         let new_state = selection_state.get();
         show_bulk_actions.set(new_state.has_selected_items() || new_state.has_selected_files());
     };
 
     let clear_selection = move || {
-        let mut state = selection_state.get();
-        state.clear();
-        state.save_to_storage();
-        selection_state.set(state);
+        selection_state.update(|state| {
+            state.clear();
+            state.save_to_storage();
+        });
         show_bulk_actions.set(false);
     };
 
@@ -1774,15 +1827,19 @@ pub fn DownloadsTable(
     let handle_download = {
         let downloads_clone = downloads.clone();
         let action_loading_clone = action_loading.clone();
+        let action_errors_clone = action_errors.clone();
+        let notifications_clone = notifications.clone();
         move |id: i32, download_type: DownloadType, file_id: Option<i32>| {
             #[cfg(target_arch = "wasm32")]
             {
                 let downloads_ref = downloads_clone.clone();
                 let action_loading_local = action_loading_clone.clone();
+                let action_errors_local = action_errors_clone.clone();
+                let notifications_local = notifications_clone.clone();
                 spawn_local(async move {
-                    let mut loading_map = action_loading_local.get();
-                    loading_map.insert(id, "download".to_string());
-                    action_loading_local.set(loading_map);
+                    action_loading_local.update(|loading_map| {
+                        loading_map.insert(id, "download".to_string());
+                    });
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
                             if let Ok(Some(api_key)) = storage.get_item("api_key") {
@@ -1791,9 +1848,9 @@ pub fn DownloadsTable(
                                         Ok(orig) => orig,
                                         Err(_) => {
                                             log!("Failed to get window origin");
-                                            let mut loading_map = action_loading_local.get();
-                                            loading_map.remove(&id);
-                                            action_loading_local.set(loading_map);
+                                            action_loading_local.update(|loading_map| {
+                                                loading_map.remove(&id);
+                                            });
                                             return;
                                         }
                                     };
@@ -1868,34 +1925,42 @@ pub fn DownloadsTable(
                                                                     }
                                                                 } else {
                                                                     download_success = false;
-                                                                    let mut error_map = action_errors_local.get();
-                                                                    error_map.insert(id, format!("Download response missing data field for file_id {}", fid));
-                                                                    action_errors_local.set(error_map);
+                                                                    let error_msg = format!("Download response missing data field for file_id {}", fid);
+                                                                    notifications_local.error(error_msg.clone());
+                                                                    action_errors_local.update(|error_map| {
+                                                                        error_map.insert(id, error_msg);
+                                                                    });
                                                                     log!("Download response missing data field for file_id {}", fid);
                                                                 }
                                                             }
                                                             Err(e) => {
                                                                 download_success = false;
-                                                                let mut error_map = action_errors_local.get();
-                                                                error_map.insert(id, format!("Failed to parse download response: {:?}", e));
-                                                                action_errors_local.set(error_map);
+                                                                let error_msg = format!("Failed to parse download response: {}", e);
+                                                                notifications_local.error(error_msg.clone());
+                                                                action_errors_local.update(|error_map| {
+                                                                    error_map.insert(id, error_msg);
+                                                                });
                                                                 log!("Failed to parse download response for file_id {}: {:?}", fid, e);
                                                             }
                                                         }
                                                     } else {
                                                         download_success = false;
                                                         let status = response.status();
-                                                        let mut error_map = action_errors_local.get();
-                                                        error_map.insert(id, format!("Download request failed with status: {}", status));
-                                                        action_errors_local.set(error_map);
+                                                        let error_msg = format!("Download request failed with status: {}", status);
+                                                        notifications_local.error(error_msg.clone());
+                                                        action_errors_local.update(|error_map| {
+                                                            error_map.insert(id, error_msg);
+                                                        });
                                                         log!("Download request failed for file_id {} with status: {}", fid, status);
                                                     }
                                                 }
                                                 Err(e) => {
                                                     download_success = false;
-                                                    let mut error_map = action_errors_local.get();
-                                                    error_map.insert(id, format!("Failed to request download: {:?}", e));
-                                                    action_errors_local.set(error_map);
+                                                    let error_msg = format!("Network error: {}", e);
+                                                    notifications_local.error(error_msg.clone());
+                                                    action_errors_local.update(|error_map| {
+                                                        error_map.insert(id, error_msg);
+                                                    });
                                                     log!("Failed to request download for file_id {}: {:?}", fid, e);
                                                 }
                                             }
@@ -1927,11 +1992,13 @@ pub fn DownloadsTable(
                                         }
                                         let _ = rx.await;
                                         
-                                        let mut loading_map = action_loading_local.get();
-                                        loading_map.remove(&id);
-                                        action_loading_local.set(loading_map);
+                                        action_loading_local.update(|loading_map| {
+                                            loading_map.remove(&id);
+                                        });
                                         
                                         if download_success {
+                                            notifications_local.success("Download started successfully".to_string());
+                                            let action_errors_clear = action_errors_local.clone();
                                             let (tx, rx) = futures::channel::oneshot::channel();
                                             if let Some(window_for_delay) = web_sys::window() {
                                                 let closure = wasm_bindgen::closure::Closure::once(move || {
@@ -1945,9 +2012,9 @@ pub fn DownloadsTable(
                                             }
                                             spawn_local(async move {
                                                 let _ = rx.await;
-                                                let mut error_map = action_errors_local.get();
-                                                error_map.remove(&id);
-                                                action_errors_local.set(error_map);
+                                                action_errors_clear.update(|error_map| {
+                                                    error_map.remove(&id);
+                                                });
                                             });
                                         }
                                     } else {
@@ -1992,31 +2059,39 @@ pub fn DownloadsTable(
                                                                 }
                                                                 download_success = true;
                                                             } else {
-                                                                let mut error_map = action_errors_local.get();
-                                                                error_map.insert(id, "Download response missing data field".to_string());
-                                                                action_errors_local.set(error_map);
+                                                                let error_msg = "Download response missing data field".to_string();
+                                                                notifications_local.error(error_msg.clone());
+                                                                action_errors_local.update(|error_map| {
+                                                                    error_map.insert(id, error_msg);
+                                                                });
                                                                 log!("Download response missing data field");
                                                             }
                                                         }
                                                         Err(e) => {
-                                                            let mut error_map = action_errors_local.get();
-                                                            error_map.insert(id, format!("Failed to parse download response: {:?}", e));
-                                                            action_errors_local.set(error_map);
+                                                            let error_msg = format!("Failed to parse download response: {}", e);
+                                                            notifications_local.error(error_msg.clone());
+                                                            action_errors_local.update(|error_map| {
+                                                                error_map.insert(id, error_msg);
+                                                            });
                                                             log!("Failed to parse download response: {:?}", e);
                                                         }
                                                     }
                                                 } else {
                                                     let status = response.status();
-                                                    let mut error_map = action_errors_local.get();
-                                                    error_map.insert(id, format!("Download request failed with status: {}", status));
-                                                    action_errors_local.set(error_map);
+                                                    let error_msg = format!("Download request failed with status: {}", status);
+                                                    notifications_local.error(error_msg.clone());
+                                                    action_errors_local.update(|error_map| {
+                                                        error_map.insert(id, error_msg);
+                                                    });
                                                     log!("Download request failed with status: {}", status);
                                                 }
                                             }
                                             Err(e) => {
-                                                let mut error_map = action_errors_local.get();
-                                                error_map.insert(id, format!("Failed to request download: {:?}", e));
-                                                action_errors_local.set(error_map);
+                                                let error_msg = format!("Network error: {}", e);
+                                                notifications_local.error(error_msg.clone());
+                                                action_errors_local.update(|error_map| {
+                                                    error_map.insert(id, error_msg);
+                                                });
                                                 log!("Failed to request download: {:?}", e);
                                             }
                                         }
@@ -2034,11 +2109,12 @@ pub fn DownloadsTable(
                                         }
                                         let _ = rx.await;
                                         
-                                        let mut loading_map = action_loading_local.get();
-                                        loading_map.remove(&id);
-                                        action_loading_local.set(loading_map);
+                                        action_loading_local.update(|loading_map| {
+                                            loading_map.remove(&id);
+                                        });
                                         
                                         if download_success {
+                                            notifications_local.success("Download started successfully".to_string());
                                             let action_errors_clear = action_errors_local.clone();
                                             let (tx, rx) = futures::channel::oneshot::channel();
                                             if let Some(window_for_delay) = web_sys::window() {
@@ -2053,9 +2129,9 @@ pub fn DownloadsTable(
                                             }
                                             spawn_local(async move {
                                                 let _ = rx.await;
-                                                let mut error_map = action_errors_clear.get();
-                                                error_map.remove(&id);
-                                                action_errors_clear.set(error_map);
+                                                action_errors_clear.update(|error_map| {
+                                                    error_map.remove(&id);
+                                                });
                                             });
                                         }
                                     }
@@ -2072,141 +2148,191 @@ pub fn DownloadsTable(
         let action_loading_clone = action_loading.clone();
         let action_errors_clone = action_errors.clone();
         let downloads_clone = downloads.clone();
+        let notifications_clone = notifications.clone();
+        let confirmation_state_clone = confirmation_state.clone();
+        let selection_state_clone = selection_state.clone();
         move |id: i32, download_type: DownloadType| {
-            #[cfg(target_arch = "wasm32")]
-            {
-                let action_loading_local = action_loading_clone.clone();
-                let action_errors_local = action_errors_clone.clone();
-                let downloads_local = downloads_clone.clone();
-                spawn_local(async move {
-                    if let Some(window) = web_sys::window() {
-                        if let Ok(Some(storage)) = window.local_storage() {
-                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
-                                if !api_key.is_empty() {
-                                    let client = TorboxClient::new(api_key.clone());
-                                    
-                                    let mut loading_map = action_loading_local.get();
-                                    loading_map.insert(id, "delete".to_string());
-                                    action_loading_local.set(loading_map);
-                                    
-                                    let result = match download_type {
-                                        DownloadType::Torrent => {
-                                            client.control_torrent("delete".to_string(), id, false).await
-                                        }
-                                        DownloadType::WebDownload => {
-                                            client.control_web_download("delete".to_string(), id, false).await
-                                        }
-                                        DownloadType::Usenet => {
-                                            client.control_usenet_download("delete".to_string(), id, false).await
-                                        }
-                                    };
-                                    
-                                    match result {
-                                        Ok(_) => {
-                                            log!("Delete request successful for ID: {}, polling until removed", id);
+            let download_name = downloads_clone.get()
+                .iter()
+                .find(|d| d.id == id && d.download_type == download_type)
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| format!("Download #{}", id));
+            
+            let download_type_name = match download_type {
+                DownloadType::Torrent => "torrent",
+                DownloadType::WebDownload => "web download",
+                DownloadType::Usenet => "usenet download",
+            };
+            
+            let title = format!("Delete {}", download_type_name);
+            let message = format!("Are you sure you want to delete \"{}\"? This action cannot be undone.", download_name);
+            
+            let action_loading_local = action_loading_clone.clone();
+            let action_errors_local = action_errors_clone.clone();
+            let downloads_local = downloads_clone.clone();
+            let notifications_local = notifications_clone.clone();
+            
+            show_confirmation(
+                confirmation_state_clone,
+                title,
+                message,
+                move || {
+                    let id_clone = id;
+                    let download_type_clone = download_type.clone();
+                    let action_loading_local = action_loading_clone.clone();
+                    let action_errors_local = action_errors_clone.clone();
+                    let downloads_local = downloads_clone.clone();
+                    let notifications_local = notifications_clone.clone();
+                    let selection_state_for_delete = selection_state_clone.clone();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        spawn_local(async move {
+                            if let Some(window) = web_sys::window() {
+                                if let Ok(Some(storage)) = window.local_storage() {
+                                    if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                        if !api_key.is_empty() {
+                                            let client = TorboxClient::new(api_key.clone());
                                             
-                                            let mut poll_count = 0;
-                                            const MAX_POLLS: i32 = 30;
-                                            
-                                            loop {
-                                                let still_exists = match download_type {
-                                                    DownloadType::Torrent => {
-                                                        client.get_torrent_list(Some(id), Some(false), None, None).await
-                                                            .ok()
-                                                            .and_then(|r| r.data)
-                                                            .map(|list| !list.is_empty())
-                                                            .unwrap_or(false)
-                                                    }
-                                                    DownloadType::WebDownload => {
-                                                        client.get_web_download_list(Some(id), Some(false), None, None).await
-                                                            .ok()
-                                                            .and_then(|r| r.data)
-                                                            .map(|list| !list.is_empty())
-                                                            .unwrap_or(false)
-                                                    }
-                                                    DownloadType::Usenet => {
-                                                        client.get_usenet_download_list(Some(id), Some(false), None, None).await
-                                                            .ok()
-                                                            .and_then(|r| r.data)
-                                                            .map(|list| !list.is_empty())
-                                                            .unwrap_or(false)
-                                                    }
-                                                };
-                                                
-                                                if !still_exists {
-                                                    downloads_local.update(|downloads| {
-                                                        downloads.retain(|item| !(item.id == id && item.download_type == download_type));
-                                                    });
-                                                    
-                                                    let mut loading_map = action_loading_local.get();
-                                                    loading_map.remove(&id);
-                                                    action_loading_local.set(loading_map);
-                                                    log!("Item {} removed from table", id);
-                                                    break;
-                                                }
-                                                
-                                                poll_count += 1;
-                                                if poll_count >= MAX_POLLS {
-                                                    log!("Max polls reached for delete, removing loading state");
-                                                    let mut loading_map = action_loading_local.get();
-                                                    loading_map.remove(&id);
-                                                    action_loading_local.set(loading_map);
-                                                    break;
-                                                }
-                                                
-                                                let promise = web_sys::js_sys::Promise::new(&mut |resolve, _| {
-                                                    let closure = wasm_bindgen::closure::Closure::once(move || {
-                                                        resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
-                                                    });
-                                                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                                        closure.as_ref().unchecked_ref(),
-                                                        1000,
-                                                    );
-                                                    closure.forget();
-                                                });
-                                                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-                                            }
-                                        }
-                                        Err(e) => {
-                                            let mut error_map = action_errors_local.get();
-                                            error_map.insert(id, format!("Failed to delete: {:?}", e));
-                                            action_errors_local.set(error_map);
-                                            log!("Failed to delete download: {:?}", e);
-                                            
-                                            let mut loading_map = action_loading_local.get();
-                                            loading_map.remove(&id);
-                                            action_loading_local.set(loading_map);
-                                            
-                                            let (tx, rx) = futures::channel::oneshot::channel();
-                                            if let Some(window_for_delay) = web_sys::window() {
-                                                let closure = wasm_bindgen::closure::Closure::once(move || {
-                                                    let _ = tx.send(());
-                                                });
-                                                let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                                    closure.as_ref().unchecked_ref(),
-                                                    5000,
-                                                );
-                                                closure.forget();
-                                            }
-                                            spawn_local(async move {
-                                                let _ = rx.await;
-                                                let mut error_map = action_errors_local.get();
-                                                error_map.remove(&id);
-                                                action_errors_local.set(error_map);
+                                            action_loading_local.update(|loading_map| {
+                                                loading_map.insert(id_clone, "delete".to_string());
                                             });
+                                            
+                                            let result = match download_type_clone {
+                                                DownloadType::Torrent => {
+                                                    client.control_torrent("delete".to_string(), id_clone, false).await
+                                                }
+                                                DownloadType::WebDownload => {
+                                                    client.control_web_download("delete".to_string(), id_clone, false).await
+                                                }
+                                                DownloadType::Usenet => {
+                                                    client.control_usenet_download("delete".to_string(), id_clone, false).await
+                                                }
+                                            };
+                                            
+                                            match result {
+                                                Ok(_) => {
+                                                    log!("Delete request successful for ID: {}, polling until removed", id_clone);
+                                                    
+                                                    let mut poll_count = 0;
+                                                    const MAX_POLLS: i32 = 30;
+                                                    
+                                                    loop {
+                                                        let still_exists = match download_type_clone {
+                                                            DownloadType::Torrent => {
+                                                                client.get_torrent_list(Some(id_clone), Some(false), None, None).await
+                                                                    .ok()
+                                                                    .and_then(|r| r.data)
+                                                                    .map(|list| !list.is_empty())
+                                                                    .unwrap_or(false)
+                                                            }
+                                                            DownloadType::WebDownload => {
+                                                                client.get_web_download_list(Some(id_clone), Some(false), None, None).await
+                                                                    .ok()
+                                                                    .and_then(|r| r.data)
+                                                                    .map(|list| !list.is_empty())
+                                                                    .unwrap_or(false)
+                                                            }
+                                                            DownloadType::Usenet => {
+                                                                client.get_usenet_download_list(Some(id_clone), Some(false), None, None).await
+                                                                    .ok()
+                                                                    .and_then(|r| r.data)
+                                                                    .map(|list| !list.is_empty())
+                                                                    .unwrap_or(false)
+                                                            }
+                                                        };
+                                                        
+                                                        if !still_exists {
+                                                            downloads_local.update(|downloads| {
+                                                                downloads.retain(|item| !(item.id == id_clone && item.download_type == download_type_clone));
+                                                            });
+                                                            
+                                                            action_loading_local.update(|loading_map| {
+                                                                loading_map.remove(&id_clone);
+                                                            });
+                                                            
+                                                            let download_type_name = match download_type_clone {
+                                                                DownloadType::Torrent => "torrent",
+                                                                DownloadType::WebDownload => "web download",
+                                                                DownloadType::Usenet => "usenet download",
+                                                            };
+                                                            notifications_local.success(format!("{} deleted successfully", download_type_name));
+                                                            log!("Item {} removed from table", id_clone);
+                                                            
+                                                            let selection_state_cleanup = selection_state_for_delete.clone();
+                                                            selection_state_cleanup.update(|state| {
+                                                                state.selected_items.remove(&id_clone);
+                                                                state.selected_files.remove(&id_clone);
+                                                                if state.selected_items.is_empty() && state.selected_files.is_empty() {
+                                                                    state.clear();
+                                                                    state.save_to_storage();
+                                                                } else {
+                                                                    state.save_to_storage();
+                                                                }
+                                                            });
+                                                            
+                                                            break;
+                                                        }
+                                                        
+                                                        poll_count += 1;
+                                                        if poll_count >= MAX_POLLS {
+                                                            log!("Max polls reached for delete, removing loading state");
+                                                            action_loading_local.update(|loading_map| {
+                                                                loading_map.remove(&id_clone);
+                                                            });
+                                                            break;
+                                                        }
+                                                        
+                                                        let promise = web_sys::js_sys::Promise::new(&mut |resolve, _| {
+                                                            let window = web_sys::window().unwrap();
+                                                            let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                                resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                                                            });
+                                                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                                closure.as_ref().unchecked_ref(),
+                                                                1000,
+                                                            );
+                                                            closure.forget();
+                                                        });
+                                                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    let error_msg = format_api_error(&e);
+                                                    let download_type_name = match download_type_clone {
+                                                        DownloadType::Torrent => "torrent",
+                                                        DownloadType::WebDownload => "web download",
+                                                        DownloadType::Usenet => "usenet download",
+                                                    };
+                                                    notifications_local.error(format!("Failed to delete {}: {}", download_type_name, error_msg));
+                                                    
+                                                    action_errors_local.update(|error_map| {
+                                                        error_map.insert(id_clone, format!("Failed to delete: {}", error_msg));
+                                                    });
+                                                    log!("Failed to delete download: {:?}", e);
+                                                    
+                                                    action_loading_local.update(|loading_map| {
+                                                        loading_map.remove(&id_clone);
+                                                    });
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    );
                     }
-                });
-            }
+                },
+                ConfirmationVariant::Danger,
+                Some("Delete".to_string()),
+                Some("Cancel".to_string()),
+            );
         }
     };
 
     let handle_bulk_download = {
         let bulk_download_loading_clone = bulk_download_loading.clone();
+        let notifications_clone = notifications.clone();
         move || {
             let state = selection_state.get();
             let selected_items = state.selected_items;
@@ -2215,6 +2341,7 @@ pub fn DownloadsTable(
             #[cfg(target_arch = "wasm32")]
             {
                 let bulk_download_loading_local = bulk_download_loading_clone.clone();
+                let notifications_local = notifications_clone.clone();
                 bulk_download_loading_local.set(true);
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
@@ -2345,10 +2472,12 @@ pub fn DownloadsTable(
 
     let handle_copy_link = {
         let downloads_clone = downloads.clone();
+        let notifications_clone = notifications.clone();
         move |id: i32, download_type: DownloadType, file_id: Option<i32>| {
             #[cfg(target_arch = "wasm32")]
             {
                 let downloads_ref = downloads_clone.clone();
+                let notifications_local = notifications_clone.clone();
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
@@ -2424,8 +2553,13 @@ pub fn DownloadsTable(
                                         let promise = clipboard.write_text(&link);
                                         use wasm_bindgen_futures::JsFuture;
                                         if let Ok(_) = JsFuture::from(promise).await {
+                                            notifications_local.success("Link copied to clipboard".to_string());
                                             log!("Link copied to clipboard");
+                                        } else {
+                                            notifications_local.error("Failed to copy link to clipboard".to_string());
                                         }
+                                    } else {
+                                        notifications_local.error("No link available to copy".to_string());
                                     }
                                 }
                             }
@@ -2439,6 +2573,7 @@ pub fn DownloadsTable(
     let handle_bulk_copy_links = {
         let downloads_clone = downloads.clone();
         let bulk_copy_loading_clone = bulk_copy_loading.clone();
+        let notifications_clone = notifications.clone();
         move || {
             let state = selection_state.get();
             let selected_items = state.selected_items;
@@ -2446,6 +2581,7 @@ pub fn DownloadsTable(
             #[cfg(target_arch = "wasm32")]
             {
                 let bulk_copy_loading_local = bulk_copy_loading_clone.clone();
+                let notifications_local = notifications_clone.clone();
                 bulk_copy_loading_local.set(true);
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
@@ -2472,8 +2608,13 @@ pub fn DownloadsTable(
                             let promise = clipboard.write_text(&links_text);
                             use wasm_bindgen_futures::JsFuture;
                             if let Ok(_) = JsFuture::from(promise).await {
+                                notifications_local.success(format!("{} link(s) copied to clipboard", links.len()));
                                 log!("Links copied to clipboard");
+                            } else {
+                                notifications_local.error("Failed to copy links to clipboard".to_string());
                             }
+                        } else {
+                            notifications_local.warning("No links available to copy".to_string());
                         }
                     }
                     bulk_copy_loading_local.set(false);
@@ -2485,27 +2626,56 @@ pub fn DownloadsTable(
     let handle_bulk_delete = {
         let clear_selection_clone = clear_selection.clone();
         let bulk_delete_loading_clone = bulk_delete_loading.clone();
+        let notifications_clone = notifications.clone();
+        let confirmation_state_clone = confirmation_state.clone();
+        let selection_state_clone = selection_state.clone();
+        let downloads_clone_for_bulk = downloads.clone();
         move || {
-            let state = selection_state.get();
+            let state = selection_state_clone.get();
             let selected_items = state.selected_items.clone();
-            let downloads_clone = downloads.clone();
+            let item_count = selected_items.len();
+            
+            if item_count == 0 {
+                return;
+            }
+            
+            let title = "Delete Selected Items".to_string();
+            let message = format!(
+                "Are you sure you want to delete {} selected item(s)? This action cannot be undone.",
+                item_count
+            );
+            
+            let clear_selection_for_callback = clear_selection_clone.clone();
+            let bulk_delete_loading_for_callback = bulk_delete_loading_clone.clone();
+            let notifications_for_callback = notifications_clone.clone();
+            let downloads_for_callback = downloads_clone_for_bulk.clone();
+            let selected_items_for_delete = selected_items.clone();
+            
+            show_confirmation(
+                confirmation_state_clone,
+                title,
+                message,
+                move || {
+                    let downloads_local = downloads_for_callback.clone();
+                    let selected_items_clone = selected_items_for_delete.clone();
         
-        #[cfg(target_arch = "wasm32")]
-        {
-            let bulk_delete_loading_local = bulk_delete_loading_clone.clone();
-            bulk_delete_loading_local.set(true);
-            spawn_local(async move {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        if let Ok(Some(api_key)) = storage.get_item("api_key") {
-                            if !api_key.is_empty() {
-                                let client = TorboxClient::new(api_key.clone());
-                                let downloads_list = downloads_clone.get();
-                                
-                                const CONCURRENT_DELETES: usize = 3;
-                                const DELAY_MS: u64 = 200;
-                                
-                                let items: Vec<_> = selected_items.into_iter()
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let bulk_delete_loading_local = bulk_delete_loading_for_callback.clone();
+                        let notifications_local = notifications_for_callback.clone();
+                        bulk_delete_loading_local.set(true);
+                        spawn_local(async move {
+                            if let Some(window) = web_sys::window() {
+                                if let Ok(Some(storage)) = window.local_storage() {
+                                    if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                        if !api_key.is_empty() {
+                                            let client = TorboxClient::new(api_key.clone());
+                                            let downloads_list = downloads_local.get();
+                                            
+                                            const CONCURRENT_DELETES: usize = 3;
+                                            const DELAY_MS: u64 = 200;
+                                            
+                                            let items: Vec<_> = selected_items_clone.into_iter()
                                     .filter_map(|item_id| {
                                         downloads_list.iter()
                                             .find(|d| d.id == item_id)
@@ -2549,14 +2719,15 @@ pub fn DownloadsTable(
                                                     Ok((*item_id, download_type_clone))
                                                 }
                                                 Err(e) => {
-                                                    log!("Failed to delete {} {}: {:?}", 
+                                                    let error_msg = format_api_error(&e);
+                                                    log!("Failed to delete {} {}: {}", 
                                                         match download_type {
                                                             DownloadType::Torrent => "torrent",
                                                             DownloadType::WebDownload => "web download",
                                                             DownloadType::Usenet => "usenet",
                                                         },
                                                         item_id,
-                                                        e
+                                                        error_msg
                                                     );
                                                     Err((*item_id, download_type_clone))
                                                 }
@@ -2594,26 +2765,37 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 
-                                log!("Bulk delete completed: {} succeeded, {} failed", success_count, error_count);
-                                
-                                if !deleted_items.is_empty() {
-                                    downloads_clone.update(|downloads| {
-                                        downloads.retain(|item| {
-                                            !deleted_items.iter().any(|(id, dt)| {
-                                                item.id == *id && item.download_type == *dt
-                                            })
-                                        });
-                                    });
+                                            log!("Bulk delete completed: {} succeeded, {} failed", success_count, error_count);
+                                            
+                                            if error_count > 0 {
+                                                notifications_local.error(format!("Bulk delete: {} succeeded, {} failed", success_count, error_count));
+                                            } else if success_count > 0 {
+                                                notifications_local.success(format!("Successfully deleted {} item(s)", success_count));
+                                            }
+                                            
+                                            if !deleted_items.is_empty() {
+                                                downloads_local.update(|downloads| {
+                                                    downloads.retain(|item| {
+                                                        !deleted_items.iter().any(|(id, dt)| {
+                                                            item.id == *id && item.download_type == *dt
+                                                        })
+                                                    });
+                                                });
+                                            }
+                                            
+                                            clear_selection_for_callback();
+                                            bulk_delete_loading_local.set(false);
+                                        }
+                                    }
                                 }
-                                
-                                clear_selection_clone();
-                                bulk_delete_loading_local.set(false);
                             }
-                        }
+                        });
                     }
-                }
-            });
-        }
+                },
+                ConfirmationVariant::Danger,
+                Some("Delete".to_string()),
+                Some("Cancel".to_string()),
+            );
         }
     };
 
@@ -2621,12 +2803,14 @@ pub fn DownloadsTable(
         let action_loading_clone = action_loading.clone();
         let action_errors_clone = action_errors.clone();
         let fetch_downloads_clone = fetch_downloads.clone();
+        let notifications_clone = notifications.clone();
         move |id: i32, download_type: DownloadType, current_status: String| {
             #[cfg(target_arch = "wasm32")]
             {
                 let action_loading_local = action_loading_clone.clone();
                 let action_errors_local = action_errors_clone.clone();
                 let fetch_downloads_local = fetch_downloads_clone.clone();
+                let notifications_local = notifications_clone.clone();
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
@@ -2654,9 +2838,9 @@ pub fn DownloadsTable(
                                         }
                                     };
                                     
-                                    let mut loading_map = action_loading_local.get();
-                                    loading_map.insert(id, "stop_resume".to_string());
-                                    action_loading_local.set(loading_map);
+                                    action_loading_local.update(|loading_map| {
+                                        loading_map.insert(id, "stop_resume".to_string());
+                                    });
                                     
                                     let result = match download_type {
                                         DownloadType::Torrent => {
@@ -2670,16 +2854,31 @@ pub fn DownloadsTable(
                                         }
                                     };
                                     
-                                    let mut loading_map = action_loading_local.get();
-                                    loading_map.remove(&id);
-                                    action_loading_local.set(loading_map);
+                                    action_loading_local.update(|loading_map| {
+                                        loading_map.remove(&id);
+                                    });
                                     
                                     match result {
                                         Ok(_) => {
+                                            let operation_display = match operation.as_ref() {
+                                                "stop" => "stopped",
+                                                "resume" => "resumed",
+                                                "stop_seeding" => "stopped seeding",
+                                                _ => operation.as_ref(),
+                                            };
+                                            notifications_local.success(format!("Download {} successfully", operation_display));
                                             log!("Download {} successfully: {}", operation, id);
                                             fetch_downloads_local();
                                         }
                                         Err(e) => {
+                                            let error_msg = format_api_error(&e);
+                                            let operation_display = match operation.as_ref() {
+                                                "stop" => "stop",
+                                                "resume" => "resume",
+                                                "stop_seeding" => "stop seeding",
+                                                _ => operation.as_ref(),
+                                            };
+                                            notifications_local.error(format!("Failed to {} download: {}", operation_display, error_msg));
                                             log!("Failed to {} download: {:?}", operation, e);
                                         }
                                     }
@@ -2696,12 +2895,14 @@ pub fn DownloadsTable(
         let downloads_clone = downloads.clone();
         let action_loading_clone = action_loading.clone();
         let action_errors_clone = action_errors.clone();
+        let notifications_clone = notifications.clone();
         move |id: i32, download_type: DownloadType, file_id: Option<i32>| {
             #[cfg(target_arch = "wasm32")]
             {
                 let downloads_ref = downloads_clone.clone();
                 let action_loading_local = action_loading_clone.clone();
                 let action_errors_local = action_errors_clone.clone();
+                let notifications_local = notifications_clone.clone();
                 spawn_local(async move {
                     if let Some(window) = web_sys::window() {
                         if let Ok(Some(storage)) = window.local_storage() {
@@ -2709,9 +2910,9 @@ pub fn DownloadsTable(
                                 if !api_key.is_empty() {
                                     let client = TorboxClient::new(api_key);
                                     
-                                    let mut loading_map = action_loading_local.get();
-                                    loading_map.insert(id, "stream".to_string());
-                                    action_loading_local.set(loading_map);
+                                    action_loading_local.update(|loading_map| {
+                                        loading_map.insert(id, "stream".to_string());
+                                    });
                                     
                                     let stream_type = match download_type {
                                         DownloadType::Torrent => "torrent",
@@ -2731,9 +2932,10 @@ pub fn DownloadsTable(
                                     };
                                     
                                     if final_file_id.is_none() {
-                                        let mut loading_map = action_loading_local.get();
-                                        loading_map.remove(&id);
-                                        action_loading_local.set(loading_map);
+                                        action_loading_local.update(|loading_map| {
+                                            loading_map.remove(&id);
+                                        });
+                                        notifications_local.error("No video file found for streaming".to_string());
                                         log!("No video file found for streaming download ID: {}", id);
                                         return;
                                     }
@@ -2748,13 +2950,14 @@ pub fn DownloadsTable(
                                 
                                     let result = client.create_stream(request).await;
                                     
-                                    let mut loading_map = action_loading_local.get();
-                                    loading_map.remove(&id);
-                                    action_loading_local.set(loading_map);
+                                    action_loading_local.update(|loading_map| {
+                                        loading_map.remove(&id);
+                                    });
                                 
                                     match result {
                                         Ok(response) => {
                                             if let Some(stream_data) = response.data {
+                                                notifications_local.success("Stream opened successfully".to_string());
                                                 log!("Stream created for ID: {}", id);
                                                 if let Some(window) = web_sys::window() {
                                                     let encoded_url = js_sys::encode_uri_component(&stream_data.stream_url);
@@ -2788,29 +2991,12 @@ pub fn DownloadsTable(
                                             }
                                         }
                                         Err(e) => {
-                                            let action_errors_local = action_errors.clone();
-                                            let mut error_map = action_errors_local.get();
-                                            error_map.insert(id, format!("Failed to create stream: {:?}", e));
-                                            action_errors_local.set(error_map);
-                                            log!("Failed to create stream: {:?}", e);
-                                            
-                                            let (tx, rx) = futures::channel::oneshot::channel();
-                                            if let Some(window_for_delay) = web_sys::window() {
-                                                let closure = wasm_bindgen::closure::Closure::once(move || {
-                                                    let _ = tx.send(());
-                                                });
-                                                let _ = window_for_delay.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                                    closure.as_ref().unchecked_ref(),
-                                                    5000,
-                                                );
-                                                closure.forget();
-                                            }
-                                            spawn_local(async move {
-                                                let _ = rx.await;
-                                                let mut error_map = action_errors_local.get();
-                                                error_map.remove(&id);
-                                                action_errors_local.set(error_map);
+                                            let error_msg = format_api_error(&e);
+                                            notifications_local.error(format!("Failed to create stream: {}", error_msg));
+                                            action_errors_local.update(|error_map| {
+                                                error_map.insert(id, format!("Failed to create stream: {}", error_msg));
                                             });
+                                            log!("Failed to create stream: {:?}", e);
                                         }
                                     }
                                 }
@@ -2822,37 +3008,47 @@ pub fn DownloadsTable(
         }
     };
 
-    let handle_reannounce = move |id: i32, download_type: DownloadType| {
-        #[cfg(target_arch = "wasm32")]
-        {
-            spawn_local(async move {
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        if let Ok(Some(api_key)) = storage.get_item("api_key") {
-                            if !api_key.is_empty() {
-                                let client = TorboxClient::new(api_key);
-                                
-                                match download_type {
-                                    DownloadType::Torrent => {
-                                        match client.control_torrent("reannounce".to_string(), id, false).await {
-                                            Ok(_) => {
-                                                log!("Torrent reannounced successfully: {}", id);
-                                                fetch_downloads();
-                                            }
-                                            Err(e) => {
-                                                log!("Failed to reannounce torrent: {:?}", e);
+    let handle_reannounce = {
+        let notifications_clone = notifications.clone();
+        let fetch_downloads_clone = fetch_downloads.clone();
+        move |id: i32, download_type: DownloadType| {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let notifications_local = notifications_clone.clone();
+                let fetch_downloads_local = fetch_downloads_clone.clone();
+                spawn_local(async move {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                if !api_key.is_empty() {
+                                    let client = TorboxClient::new(api_key);
+                                    
+                                    match download_type {
+                                        DownloadType::Torrent => {
+                                            match client.control_torrent("reannounce".to_string(), id, false).await {
+                                                Ok(_) => {
+                                                    notifications_local.success("Torrent reannounced successfully".to_string());
+                                                    log!("Torrent reannounced successfully: {}", id);
+                                                    fetch_downloads_local();
+                                                }
+                                                Err(e) => {
+                                                    let error_msg = format_api_error(&e);
+                                                    notifications_local.error(format!("Failed to reannounce torrent: {}", error_msg));
+                                                    log!("Failed to reannounce torrent: {:?}", e);
+                                                }
                                             }
                                         }
-                                    }
-                                    _ => {
-                                        log!("Reannounce only available for torrents");
+                                        _ => {
+                                            notifications_local.warning("Reannounce only available for torrents".to_string());
+                                            log!("Reannounce only available for torrents");
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
         }
     };
 
@@ -3402,6 +3598,10 @@ pub fn DownloadsTable(
 
 
             <Show when=move || show_bulk_actions.get()>
+                {let handle_bulk_download_clone = handle_bulk_download.clone();
+                let handle_bulk_delete_clone = handle_bulk_delete.clone();
+                let handle_bulk_copy_links_clone = handle_bulk_copy_links.clone();
+                view! {
                 <div class="rounded-lg p-4 mb-4 transition-all duration-200" style="background: var(--bg-card); border: 1px solid var(--border-secondary);">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-4">
@@ -3433,7 +3633,7 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 disabled=move || bulk_download_loading.get() || bulk_delete_loading.get() || bulk_copy_loading.get()
-                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_download() }
+                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_download_clone() }
                             >
                                 <Show when=move || bulk_download_loading.get()>
                                     <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Accent/>
@@ -3450,7 +3650,7 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 disabled=move || bulk_download_loading.get() || bulk_delete_loading.get() || bulk_copy_loading.get()
-                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_delete() }
+                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_delete_clone() }
                             >
                                 <Show when=move || bulk_delete_loading.get()>
                                     <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Danger/>
@@ -3467,7 +3667,7 @@ pub fn DownloadsTable(
                                     }
                                 }
                                 disabled=move || bulk_download_loading.get() || bulk_delete_loading.get() || bulk_copy_loading.get()
-                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_copy_links() }
+                                on:click=move |_| if !bulk_download_loading.get() && !bulk_delete_loading.get() && !bulk_copy_loading.get() { handle_bulk_copy_links_clone() }
                                 title="Copy Links"
                             >
                                 <Show when=move || bulk_copy_loading.get()>
@@ -3490,9 +3690,20 @@ pub fn DownloadsTable(
                         </div>
                     </div>
                 </div>
+                }}
             </Show>
 
             <Show when=move || !loading.get() && error.get().is_none()>
+                {let handle_download_clone = handle_download.clone();
+                let handle_stream_clone = handle_stream.clone();
+                let handle_reannounce_clone = handle_reannounce.clone();
+                let handle_cloud_upload_clone = handle_cloud_upload.clone();
+                let handle_stop_resume_clone = handle_stop_resume.clone();
+                let handle_delete_clone = handle_delete.clone();
+                let handle_copy_link_clone = handle_copy_link.clone();
+                let notifications_clone_for_view = notifications.clone();
+                let confirmation_state_clone_for_view = confirmation_state.clone();
+                view! {
                 <div class="rounded-xl border" style="background-color: var(--bg-card); border-color: var(--border-secondary);">
                     <div style="height: 70vh; overflow-y: scroll; overflow-x: auto; display: block;">
                         <table class="table-fixed" style="width: 100%; min-width: 1200px;">
@@ -3647,11 +3858,20 @@ pub fn DownloadsTable(
                             <tbody class="divide-y divide-slate-700/30">
                                 <For each=move || filtered_downloads.get() key=|download| download.id let:download>
                                     {
+                                        let handle_download_for_row = handle_download_clone.clone();
+                                        let handle_stream_for_row = handle_stream_clone.clone();
+                                        let handle_reannounce_for_row = handle_reannounce_clone.clone();
+                                        let handle_stop_resume_for_row = handle_stop_resume_clone.clone();
+                                        let handle_delete_for_row = handle_delete_clone.clone();
+                                        let handle_cloud_upload_for_row = handle_cloud_upload_clone.clone();
+                                        let handle_copy_link_for_row = handle_copy_link_clone.clone();
                                         let is_expanded = move || expanded_rows.get().contains(&download.id);
                                         let download_clone = download.clone();
                                         let pause_resume_clone = download.clone();
                                         let delete_clone = download.clone();
                                         let stream_clone = download.clone();
+                                        let notifications_clone_for_row = notifications_clone_for_view.clone();
+                                        let confirmation_state_clone_for_row = confirmation_state_clone_for_view.clone();
                                         let reannounce_clone = download.clone();
                                         let cloud_upload_clone = download.clone();
                                         let files_for_check = download.files.clone();
@@ -3668,7 +3888,7 @@ pub fn DownloadsTable(
                                                         <input
                                                             type="checkbox"
                                                             class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                                                            checked=move || selection_state.get().is_item_selected(download.id)
+                                                            checked=move || selection_state.with(|s| s.is_item_selected(download.id))
                                                             on:change=move |_| toggle_item_selection(download.id)
                                                         />
                                                     </td>
@@ -3906,7 +4126,10 @@ pub fn DownloadsTable(
                                                                         class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_download_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
                                                                         style={move || if is_download_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
                                                                         disabled=move || !is_download_enabled(&status_disabled) || action_loading_clone.get().get(&download_button_clone.id) == Some(&"download".to_string())
-                                                                        on:click=move |_| if is_download_enabled(&status_click) && action_loading_clone.get().get(&download_button_clone.id) != Some(&"download".to_string()) { handle_download(download_button_clone.id, download_button_clone.download_type.clone(), None) }
+                                                                        on:click={
+                                                                            let handle_download_for_row_clone = handle_download_for_row.clone();
+                                                                            move |_| if is_download_enabled(&status_click) && action_loading_clone.get().get(&download_button_clone.id) != Some(&"download".to_string()) { handle_download_for_row_clone(download_button_clone.id, download_button_clone.download_type.clone(), None) }
+                                                                        }
                                                                         title={move || if is_download_enabled(&status_title) { "Download".to_string() } else { "Download not available for this status".to_string() }}
                                                                     >
                                                                         <Show when=move || action_loading_clone.get().get(&download_button_clone.id) == Some(&"download".to_string())>
@@ -3940,7 +4163,7 @@ pub fn DownloadsTable(
                                                                         class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_pause_resume_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
                                                                         style={move || if is_pause_resume_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
                                                                         disabled=move || !is_pause_resume_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"stop_resume".to_string())
-                                                                        on:click=move |_| if is_pause_resume_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"stop_resume".to_string()) { handle_stop_resume(pause_resume_clone.id, pause_resume_clone.download_type.clone(), pause_resume_clone.status.clone()) }
+                                                                        on:click=move |_| if is_pause_resume_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"stop_resume".to_string()) { handle_stop_resume_for_row(pause_resume_clone.id, pause_resume_clone.download_type.clone(), pause_resume_clone.status.clone()) }
                                                                         title={move || if is_pause_resume_enabled(&status_title) { 
                                                                             match status_title.to_lowercase().as_str() {
                                                                                 "downloading" | "active" | "seeding" => "Stop".to_string(),
@@ -3975,12 +4198,172 @@ pub fn DownloadsTable(
                                                                 let status_svg_for_style = download.status.clone();
                                                                 let download_id = delete_clone.id;
                                                                 let action_loading_clone = action_loading.clone();
+                                                                let delete_id_val = delete_clone.id;
+                                                                let delete_type_val = delete_clone.download_type.clone();
+                                                                let status_click_val = status_click.clone();
+                                                                let download_name_val = delete_clone.name.clone();
+                                                                let action_loading_for_delete = action_loading.clone();
+                                                                let action_errors_for_delete = action_errors.clone();
+                                                                let downloads_for_delete = downloads.clone();
+                                                                let notifications_clone_for_delete = notifications_clone_for_row.clone();
+                                                                let confirmation_state_for_delete = confirmation_state_clone_for_row.clone();
                                                                 view! {
-                                                                    <button
-                                                                        class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_delete_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
-                                                                        style={move || if is_delete_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
-                                                                        disabled=move || !is_delete_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"delete".to_string())
-                                                                        on:click=move |_| if is_delete_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"delete".to_string()) { handle_delete(delete_clone.id, delete_clone.download_type.clone()) }
+                                                                        <button
+                                                                            class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_delete_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
+                                                                            style={move || if is_delete_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
+                                                                            disabled=move || !is_delete_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"delete".to_string())
+                                                                            on:click=move |_| {
+                                                                                if is_delete_enabled(&status_click_val) && action_loading_for_delete.get().get(&delete_id_val) != Some(&"delete".to_string()) {
+                                                                                    let download_type_name = match delete_type_val {
+                                                                                        DownloadType::Torrent => "torrent",
+                                                                                        DownloadType::WebDownload => "web download",
+                                                                                        DownloadType::Usenet => "usenet download",
+                                                                                    };
+                                                                                    let title = format!("Delete {}", download_type_name);
+                                                                                    let message = format!("Are you sure you want to delete \"{}\"? This action cannot be undone.", download_name_val);
+                                                                                    let notifications_for_callback = notifications_clone_for_delete.clone();
+                                                                                    show_confirmation(
+                                                                                        confirmation_state_for_delete,
+                                                                                        title,
+                                                                                        message,
+                                                                                        move || {
+                                                                                            let id = delete_id_val;
+                                                                                            let download_type = delete_type_val.clone();
+                                                                                            let action_loading_local = action_loading_for_delete.clone();
+                                                                                            let action_errors_local = action_errors_for_delete.clone();
+                                                                                            let downloads_local = downloads_for_delete.clone();
+                                                                                            let notifications_local = notifications_for_callback.clone();
+                                                                                            #[cfg(target_arch = "wasm32")]
+                                                                                            {
+                                                                                                spawn_local(async move {
+                                                                                                    if let Some(window) = web_sys::window() {
+                                                                                                        if let Ok(Some(storage)) = window.local_storage() {
+                                                                                                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                                                                                                if !api_key.is_empty() {
+                                                                                                                    let client = TorboxClient::new(api_key.clone());
+                                                                                                                    
+                                                                                                                    action_loading_local.update(|loading_map| {
+                                                                                                                        loading_map.insert(id, "delete".to_string());
+                                                                                                                    });
+                                                                                                                    
+                                                                                                                    let result = match download_type {
+                                                                                                                        DownloadType::Torrent => {
+                                                                                                                            client.control_torrent("delete".to_string(), id, false).await
+                                                                                                                        }
+                                                                                                                        DownloadType::WebDownload => {
+                                                                                                                            client.control_web_download("delete".to_string(), id, false).await
+                                                                                                                        }
+                                                                                                                        DownloadType::Usenet => {
+                                                                                                                            client.control_usenet_download("delete".to_string(), id, false).await
+                                                                                                                        }
+                                                                                                                    };
+                                                                                                                    
+                                                                                                                    match result {
+                                                                                                                        Ok(_) => {
+                                                                                                                            log!("Delete request successful for ID: {}, polling until removed", id);
+                                                                                                                            
+                                                                                                                            let mut poll_count = 0;
+                                                                                                                            const MAX_POLLS: i32 = 30;
+                                                                                                                            
+                                                                                                                            loop {
+                                                                                                                                let still_exists = match download_type {
+                                                                                                                                    DownloadType::Torrent => {
+                                                                                                                                        client.get_torrent_list(Some(id), Some(false), None, None).await
+                                                                                                                                            .ok()
+                                                                                                                                            .and_then(|r| r.data)
+                                                                                                                                            .map(|list| !list.is_empty())
+                                                                                                                                            .unwrap_or(false)
+                                                                                                                                    }
+                                                                                                                                    DownloadType::WebDownload => {
+                                                                                                                                        client.get_web_download_list(Some(id), Some(false), None, None).await
+                                                                                                                                            .ok()
+                                                                                                                                            .and_then(|r| r.data)
+                                                                                                                                            .map(|list| !list.is_empty())
+                                                                                                                                            .unwrap_or(false)
+                                                                                                                                    }
+                                                                                                                                    DownloadType::Usenet => {
+                                                                                                                                        client.get_usenet_download_list(Some(id), Some(false), None, None).await
+                                                                                                                                            .ok()
+                                                                                                                                            .and_then(|r| r.data)
+                                                                                                                                            .map(|list| !list.is_empty())
+                                                                                                                                            .unwrap_or(false)
+                                                                                                                                    }
+                                                                                                                                };
+                                                                                                                                
+                                                                                                                                if !still_exists {
+                                                                                                                                    downloads_local.update(|downloads| {
+                                                                                                                                        downloads.retain(|item| !(item.id == id && item.download_type == download_type));
+                                                                                                                                    });
+                                                                                                                                    
+                                        action_loading_local.update(|loading_map| {
+                                            loading_map.remove(&id);
+                                        });
+                                                                                                                                    
+                                                                                                                                    let download_type_name = match download_type {
+                                                                                                                                        DownloadType::Torrent => "torrent",
+                                                                                                                                        DownloadType::WebDownload => "web download",
+                                                                                                                                        DownloadType::Usenet => "usenet download",
+                                                                                                                                    };
+                                                                                                                                    notifications_local.success(format!("{} deleted successfully", download_type_name));
+                                                                                                                                    log!("Item {} removed from table", id);
+                                                                                                                                    break;
+                                                                                                                                }
+                                                                                                                                
+                                                                                                                                poll_count += 1;
+                                                                                                                                if poll_count >= MAX_POLLS {
+                                                                                                                                    log!("Max polls reached for delete, removing loading state");
+                                        action_loading_local.update(|loading_map| {
+                                            loading_map.remove(&id);
+                                        });
+                                                                                                                                    break;
+                                                                                                                                }
+                                                                                                                                
+                                                                                                                                let promise = web_sys::js_sys::Promise::new(&mut |resolve, _| {
+                                                                                                                                    let window = web_sys::window().unwrap();
+                                                                                                                                    let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                                                                                                        resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                                                                                                                                    });
+                                                                                                                                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                                                                                                        closure.as_ref().unchecked_ref(),
+                                                                                                                                        1000,
+                                                                                                                                    );
+                                                                                                                                    closure.forget();
+                                                                                                                                });
+                                                                                                                                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                                                                                                                            }
+                                                                                                                        }
+                                                                                                                        Err(e) => {
+                                                                                                                            let error_msg = format_api_error(&e);
+                                                                                                                            let download_type_name = match download_type {
+                                                                                                                                DownloadType::Torrent => "torrent",
+                                                                                                                                DownloadType::WebDownload => "web download",
+                                                                                                                                DownloadType::Usenet => "usenet download",
+                                                                                                                            };
+                                                                                                                            notifications_local.error(format!("Failed to delete {}: {}", download_type_name, error_msg));
+                                                                                                                            
+                                                                                                                            action_errors_local.update(|error_map| {
+                                                                                                                                error_map.insert(id, format!("Failed to delete: {}", error_msg));
+                                                                                                                            });
+                                                                                                                            log!("Failed to delete download: {:?}", e);
+                                                                                                                            
+                                                                                                                            action_loading_local.update(|loading_map| {
+                                                                                                                                loading_map.remove(&id);
+                                                                                                                            });
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                });
+                                                                                            }
+                                                                                        },
+                                                                                        ConfirmationVariant::Danger,
+                                                                                        Some("Delete".to_string()),
+                                                                                        Some("Cancel".to_string()),
+                                                                                    );
+                                                                                }
+                                                                            }
                                                                         title={move || if is_delete_enabled(&status_title) { "Delete".to_string() } else { "Delete not available".to_string() }}
                                                                     >
                                                                         <Show when=move || action_loading_clone.get().get(&download_id) == Some(&"delete".to_string())>
@@ -4008,7 +4391,10 @@ pub fn DownloadsTable(
                                                                         <button
                                                                             class="p-2 rounded transition-colors flex items-center justify-center"
                                                                             style="background-color: transparent;"
-                                                                            on:click=move |_| handle_reannounce(reannounce_clone.id, reannounce_clone.download_type.clone())
+                                                                            on:click={
+                                                                                let handle_reannounce_local = handle_reannounce_for_row.clone();
+                                                                                move |_| handle_reannounce_local(reannounce_clone.id, reannounce_clone.download_type.clone())
+                                                                            }
                                                                             title="Reannounce torrent"
                                                                         >
                                                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--accent-warning);">
@@ -4033,7 +4419,10 @@ pub fn DownloadsTable(
                                                                         class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_stream_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
                                                                         style={move || if is_stream_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
                                                                         disabled=move || !is_stream_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"stream".to_string())
-                                                                        on:click=move |_| if is_stream_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"stream".to_string()) { handle_stream(stream_clone.id, stream_clone.download_type.clone(), None) }
+                                                                        on:click={
+                                                                            let handle_stream_for_row_clone = handle_stream_for_row.clone();
+                                                                            move |_| if is_stream_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"stream".to_string()) { handle_stream_for_row_clone(stream_clone.id, stream_clone.download_type.clone(), None) }
+                                                                        }
                                                                         title={move || {
                                                                             if !has_streaming_plan() {
                                                                                 "Streaming requires Pro plan".to_string()
@@ -4189,8 +4578,10 @@ pub fn DownloadsTable(
                                                                             on:click={
                                                                                 let cloud_upload_google = cloud_upload_clone.clone();
                                                                                 let open_dropdown_close_google = open_dropdown.clone();
+                                                                                let handle_cloud_upload_for_row_clone = handle_cloud_upload_for_row.clone();
                                                                                 move |_| {
-                                                                                    handle_cloud_upload(cloud_upload_google.id, cloud_upload_google.download_type.clone(), "google".to_string());
+                                                                                    let handle_cloud_upload_local = handle_cloud_upload_for_row_clone.clone();
+                                                                                    handle_cloud_upload_local(cloud_upload_google.id, cloud_upload_google.download_type.clone(), "google".to_string());
                                                                                     open_dropdown_close_google.set(None);
                                                                                 }
                                                                             }
@@ -4203,8 +4594,10 @@ pub fn DownloadsTable(
                                                                             on:click={
                                                                                 let cloud_upload_dropbox = cloud_upload_clone.clone();
                                                                                 let open_dropdown_close_dropbox = open_dropdown.clone();
+                                                                                let handle_cloud_upload_for_row_clone = handle_cloud_upload_for_row.clone();
                                                                                 move |_| {
-                                                                                    handle_cloud_upload(cloud_upload_dropbox.id, cloud_upload_dropbox.download_type.clone(), "dropbox".to_string());
+                                                                                    let handle_cloud_upload_local = handle_cloud_upload_for_row_clone.clone();
+                                                                                    handle_cloud_upload_local(cloud_upload_dropbox.id, cloud_upload_dropbox.download_type.clone(), "dropbox".to_string());
                                                                                     open_dropdown_close_dropbox.set(None);
                                                                                 }
                                                                             }
@@ -4217,8 +4610,10 @@ pub fn DownloadsTable(
                                                                             on:click={
                                                                                 let cloud_upload_onedrive = cloud_upload_clone.clone();
                                                                                 let open_dropdown_close_onedrive = open_dropdown.clone();
+                                                                                let handle_cloud_upload_for_row_clone = handle_cloud_upload_for_row.clone();
                                                                                 move |_| {
-                                                                                    handle_cloud_upload(cloud_upload_onedrive.id, cloud_upload_onedrive.download_type.clone(), "onedrive".to_string());
+                                                                                    let handle_cloud_upload_local = handle_cloud_upload_for_row_clone.clone();
+                                                                                    handle_cloud_upload_local(cloud_upload_onedrive.id, cloud_upload_onedrive.download_type.clone(), "onedrive".to_string());
                                                                                     open_dropdown_close_onedrive.set(None);
                                                                                 }
                                                                             }
@@ -4235,6 +4630,9 @@ pub fn DownloadsTable(
                                                 
                                                 <Show when=move || expanded_file_rows.get().contains(&download_id_for_files) && files_empty_check>
                                                     {
+                                                        let handle_download_for_files = handle_download_for_row.clone();
+                                                        let handle_stream_for_files = handle_stream_for_row.clone();
+                                                        let handle_copy_link_for_files = handle_copy_link_for_row.clone();
                                                         let download_files_count = files_for_display.len();
                                                         let files_list_for_for = files_for_display.clone();
                                                         let download_for_for = download_for_files_display.clone();
@@ -4260,6 +4658,9 @@ pub fn DownloadsTable(
                                                                                 <tbody class="divide-y divide-slate-700/30">
                                                                                     <For each=move || files_list_for_for.clone() key=|file| file.id let:file>
                                                                                 {
+                                                                                    let handle_download_for_file = handle_download_for_files.clone();
+                                                                                    let handle_stream_for_file = handle_stream_for_files.clone();
+                                                                                    let handle_copy_link_for_file = handle_copy_link_for_files.clone();
                                                                                     let file_download_clone = download_for_for.clone();
                                                                                     let file_clone = file.clone();
                                                                                     view! {
@@ -4294,12 +4695,15 @@ pub fn DownloadsTable(
                                                                                                 <div class="flex items-center space-x-2">
                                                                                                     <button
                                                                                                         class="p-2 bg-green-600 hover:bg-green-700 text-white rounded transition-colors flex items-center justify-center"
-                                                                                                        on:click=move |_| {
-                                                                                                            let download_id = file_download_clone.id;
-                                                                                                            let download_type = file_download_clone.download_type.clone();
-                                                                                                            let file_id = file_clone.id;
-                                                                                                            handle_download(download_id, download_type, Some(file_id));
-                                                                                                        }
+                                                                                                        on:click={
+                                                                            let handle_download_local = handle_download_for_file.clone();
+                                                                            move |_| {
+                                                                                let download_id = file_download_clone.id;
+                                                                                let download_type = file_download_clone.download_type.clone();
+                                                                                let file_id = file_clone.id;
+                                                                                handle_download_local(download_id, download_type, Some(file_id));
+                                                                            }
+                                                                        }
                                                                                                         title="Download File"
                                                                                                     >
                                                                                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4309,11 +4713,14 @@ pub fn DownloadsTable(
                                                                                                     <button
                                                                                                         class="p-2 rounded transition-colors flex items-center justify-center"
                                                                                                         style="background-color: transparent;"
-                                                                                                        on:click=move |_| {
-                                                                                                            let download_id = file_download_clone.id;
-                                                                                                            let download_type = file_download_clone.download_type.clone();
-                                                                                                            let file_id = file_clone.id;
-                                                                                                            handle_copy_link(download_id, download_type, Some(file_id));
+                                                                                                        on:click={
+                                                                                                            let handle_copy_link_local = handle_copy_link_for_file.clone();
+                                                                                                            move |_| {
+                                                                                                                let download_id = file_download_clone.id;
+                                                                                                                let download_type = file_download_clone.download_type.clone();
+                                                                                                                let file_id = file_clone.id;
+                                                                                                                handle_copy_link_local(download_id, download_type, Some(file_id));
+                                                                                                            }
                                                                                                         }
                                                                                                         title="Copy Download Link"
                                                                                                     >
@@ -4332,11 +4739,14 @@ pub fn DownloadsTable(
                                                                                                                 <button
                                                                                                                     class="p-2 rounded transition-colors flex items-center justify-center"
                                                                                                                     style="background-color: transparent;"
-                                                                                                                    on:click=move |_| {
-                                                                                                                        let download_id = file_stream_clone.id;
-                                                                                                                        let download_type = file_stream_clone.download_type.clone();
-                                                                                                                        let file_id = file_stream_file_clone.id;
-                                                                                                                        handle_stream(download_id, download_type, Some(file_id));
+                                                                                                                    on:click={
+                                                                                                                        let handle_stream_local = handle_stream_for_file.clone();
+                                                                                                                        move |_| {
+                                                                                                                            let download_id = file_stream_clone.id;
+                                                                                                                            let download_type = file_stream_clone.download_type.clone();
+                                                                                                                            let file_id = file_stream_file_clone.id;
+                                                                                                                            handle_stream_local(download_id, download_type, Some(file_id));
+                                                                                                                        }
                                                                                                                     }
                                                                                                                     title="Stream File"
                                                                                                                 >
@@ -4370,6 +4780,7 @@ pub fn DownloadsTable(
                         </table>
                     </div>
                 </div>
+                }}
             </Show>
         </div>
     }

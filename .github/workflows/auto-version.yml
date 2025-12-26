@@ -120,7 +120,7 @@ jobs:
             
             ### Docker Images
             
-            Multi-architecture Docker images are available on GitHub Container Registry:
+            Docker images are available on GitHub Container Registry:
             
             ```bash
             # Pull the latest version
@@ -147,6 +147,6 @@ jobs:
             
             ### Changes
             
-            This release includes various improvements and bug fixes.
+            See git log for changes.
           draft: false
           prerelease: false
