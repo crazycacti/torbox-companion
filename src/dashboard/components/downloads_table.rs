@@ -652,10 +652,35 @@ fn format_date(date_str: &str) -> String {
         return "N/A".to_string();
     }
     
-    if let Ok(parsed) = DateTime::parse_from_rfc3339(date_str) {
-        parsed.format("%B %d, %Y at %I:%M %p").to_string()
-    } else {
-        date_str.to_string()
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Ok(parsed) = DateTime::parse_from_rfc3339(date_str) {
+            let utc_timestamp = parsed.timestamp_millis();
+            if let Some(window) = web_sys::window() {
+                let js_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(utc_timestamp as f64));
+                let month = js_date.get_month() as u32;
+                let day = js_date.get_date() as u32;
+                let year = js_date.get_full_year() as u32;
+                let hours = js_date.get_hours() as u32;
+                let minutes = js_date.get_minutes() as u32;
+                let am_pm = if hours < 12 { "AM" } else { "PM" };
+                let display_hours = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+                let month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                format!("{} {}, {} at {}:{:02} {}", month_names[month as usize], day, year, display_hours, minutes, am_pm)
+            } else {
+                parsed.format("%B %d, %Y at %I:%M %p").to_string()
+            }
+        } else {
+            date_str.to_string()
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Ok(parsed) = DateTime::parse_from_rfc3339(date_str) {
+            parsed.format("%B %d, %Y at %I:%M %p").to_string()
+        } else {
+            date_str.to_string()
+        }
     }
 }
 

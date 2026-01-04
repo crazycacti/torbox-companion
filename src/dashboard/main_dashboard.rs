@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 use crate::dashboard::{DashboardHeader, DashboardContext};
-use crate::dashboard::tabs::{OverviewTab, UsersTab, ThemesTab};
+use crate::dashboard::tabs::{OverviewTab, UsersTab, ThemesTab, AutomationsTab};
 use crate::themes::ThemeManager;
 
 #[component]
@@ -31,6 +31,10 @@ pub fn MainDashboard() -> impl IntoView {
                 
                 <Show when=move || active_tab.get() == "themes">
                     <ThemesTab/>
+                </Show>
+                
+                <Show when=move || active_tab.get() == "automations">
+                    <AutomationsTab/>
                 </Show>
             </main>
         </div>

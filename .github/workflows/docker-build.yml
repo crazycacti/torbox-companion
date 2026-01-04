@@ -206,8 +206,21 @@ jobs:
             fi
           done
 
+      - name: Read manifest digest
+        id: manifest_digest
+        run: |
+          FIRST_TAG=$(echo "${{ needs.prepare.outputs.tags }}" | head -n1 | tr -d ' ')
+          echo "Inspecting manifest list: $FIRST_TAG"
+          MANIFEST_DIGEST=$(docker buildx imagetools inspect "$FIRST_TAG" --format '{{json .}}' | jq -r '.manifest.digest // .digest // empty' || echo "")
+          if [ -z "$MANIFEST_DIGEST" ]; then
+            echo "Error: Could not extract manifest digest from $FIRST_TAG"
+            exit 1
+          fi
+          echo "MANIFEST_DIGEST=${MANIFEST_DIGEST}" >> $GITHUB_OUTPUT
+          echo "Manifest digest: ${MANIFEST_DIGEST}"
+
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@$(find . -name "linux-amd64.digest" -type f | head -1 | xargs cat)
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.manifest_digest.outputs.MANIFEST_DIGEST }}
           push-to-registry: true

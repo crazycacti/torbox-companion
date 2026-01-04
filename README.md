@@ -1,230 +1,203 @@
 # Torbox Companion
 
-An alternative to the default TorBox UI. Manage downloads, streaming, and more.
+An alternative UI for TorBox. Manage downloads, streaming, and automation rules.
 
-> **Note**: This is a complete rewrite of the original [TorBox Manager](https://github.com/jittarao/torbox-app) built with Rust instead of Next.js for superior performance and memory safety.
+> Complete rewrite of the original [TorBox Manager](https://github.com/jittarao/torbox-app) in Rust for a new UI, better performance and memory safety.
 
-## Features
+---
 
-- **Fast & Secure**: Built with Rust for maximum performance and security
-- **Complete TorBox Integration**: Full API coverage for torrents, web downloads, usenet, streaming, and search
-- **Modern Dark UI**: Clean, responsive interface with dark theme optimized for power users
-- **API Key Authentication**: Secure API key management with local storage
-- **Docker Ready**: Containerized for easy deployment
-- **Lightweight**: Minimal dependencies for optimal performance
-- **Real-time Updates**: Live status monitoring and automatic refresh
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable)
 - [cargo-leptos](https://github.com/leptos-rs/cargo-leptos)
-- [Docker](https://www.docker.com/) (optional)
+- Docker (optional)
 
-### Installing cargo-leptos
+### Install cargo-leptos
 
 ```bash
 cargo install cargo-leptos --locked
 ```
 
-### Running the project
+### Run
 
-#### Development
-
+**Development:**
 ```bash
 cargo leptos watch
 ```
+Open `http://localhost:3000` in your browser.
 
-This will watch for changes and automatically recompile. Open your browser to `http://localhost:3000`.
-
-#### Docker
-
+**Docker:**
 ```bash
 docker compose up -d
 ```
 
-#### Production Build
-
+**Production:**
 ```bash
 cargo leptos build --release
 ```
 
 ## Requirements
 
-- Rust 1.70 or later
-- A running TorBox instance with API access
-- Valid TorBox API key (get yours from [TorBox Settings](https://torbox.app/settings))
+- Rust 1.70+
+- TorBox API key ([get one here](https://torbox.app/settings))
 
-## Tech Stack
+## Features
 
-- **Framework**: Leptos (full-stack Rust web framework)
-- **Backend**: Axum (async web framework)
-- **Styling**: Tailwind CSS with custom SCSS
-- **Runtime**: Tokio (async runtime)
-- **Containerization**: Docker with multi-stage builds
-- **HTTP Client**: Reqwest for API communication
+- Rust-based for performance and memory safety
+- Full TorBox API coverage (torrents, web downloads, usenet, streaming, search)
+- Dark UI optimized for power users
+- Automation rules for scheduled torrent management
+- Docker support
+- Real-time status updates
 
 ## API Features
 
-### Complete TorBox API Coverage
+- User management (profile, subscriptions, transactions)
+- File management (create, control, monitor, download)
+- Web downloads with progress tracking
+- Usenet (NZB) processing
+- RSS feed monitoring
+- Video streaming with subtitles
+- Search (metadata, file discovery, usenet)
+- Cloud uploads (Google Drive, Dropbox, OneDrive)
+- Batch operations
 
-- **User Management**: Profile, subscriptions, transactions, referrals
-- **File Management**: Create, control, monitor, and download files
-- **Web Downloads**: Direct download from URLs with progress tracking
-- **Usenet Downloads**: NZB file processing and management
-- **RSS Feeds**: Automated file monitoring and downloading
-- **Streaming**: Video streaming with subtitle and audio track support
-- **Search Integration**: Metadata search, file discovery, usenet search
-- **Cloud Integration**: Google Drive, Dropbox, OneDrive uploads
-- **Notifications**: Real-time status updates and alerts
+## Tech Stack
 
-### Advanced Features
+- Leptos (full-stack Rust framework)
+- Axum (async web server)
+- Tailwind CSS + custom SCSS
+- Tokio (async runtime)
+- Docker (multi-stage builds)
 
-- **Batch Operations**: Upload multiple files simultaneously
-- **Smart Downloads**: Cherry-pick specific files across multiple downloads
-- **Real-time Monitoring**: Live status updates and progress tracking
-- **Customizable Interface**: Tailor the workflow to match your needs
+## Automation Rules
 
-## Development
+Schedule automated actions on torrents based on conditions.
 
-### Adding Dependencies
+### Features
 
-Add new dependencies to `Cargo.toml`:
+- Multiple conditions (seeding time, ratio, stalled time, file size, progress, etc.)
+- Cron expressions or interval triggers (minimum 30 minutes)
+- Actions: stop seeding, delete, stop, resume, restart, reannounce, force start
+- Execution logs with success/failure status
+- Force run on demand
+- Bulk rule management
 
-```toml
-[dependencies]
-your-crate = "1.0"
-```
+### Creating a Rule
 
-### Building for Production
+1. Go to Automations tab
+2. Click "Create Rule"
+3. Set trigger (cron or interval)
+4. Add conditions (e.g., "SeedingTime > 24 hours")
+5. Choose action (e.g., "Stop Seeding")
+6. Save
+
+### Presets
+
+- **Delete Inactive Torrents** - Removes failed, expired, stalled torrents
+- **Delete Stalled Torrents** - Removes torrents stalled for specified time
+
+### Server Administration
+
+**Delete all rules and logs:**
 
 ```bash
-cargo leptos build --release
+sqlite3 data/torbox.db "DELETE FROM rule_execution_log; DELETE FROM automation_rules;"
 ```
 
-The server will be available at `target/release/torbox-companion`.
 
-### Docker Deployment
+**Delete rules for a specific user:**
 
-#### Build and Run
+```sql
+DELETE FROM rule_execution_log WHERE api_key_hash = 'api_key_hash_here';
+DELETE FROM automation_rules WHERE api_key_hash = 'api_key_hash_here';
+```
+
+Database location: `data/torbox.db` (or your mounted data volume)
+
+## Configuration
+
+### Environment Variables
 
 ```bash
-docker compose up -d
+LEPTOS_SITE_ADDR=0.0.0.0:3000
+TORBOX_MAX_RULES_PER_USER=100
+TORBOX_LOG_RETENTION_DAYS=90
+TORBOX_RULE_EXECUTION_TIMEOUT_SECS=130
 ```
 
-#### Custom Configuration
+**Automation settings:**
 
-The application uses environment variables for configuration:
-
-```bash
-LEPTOS_SITE_ADDR=0.0.0.0:3000  # Server address
-```
+- `TORBOX_MAX_RULES_PER_USER` - Limits rules per user to prevent resource exhaustion (default: 100)
+- `TORBOX_LOG_RETENTION_DAYS` - How long to keep execution logs before cleanup (default: 90)
+- `TORBOX_RULE_EXECUTION_TIMEOUT_SECS` - Maximum execution time before timeout (default: 130)
 
 ## Security
 
-- API keys are stored locally and never transmitted
-- No user data is stored on servers
-- Built with Rust's memory safety guarantees
-- Minimal attack surface with focused dependencies
-- Secure by default with modern web security practices
+**API Key Storage:**
+
+- Automation rules: Encrypted with AES-256-GCM, stored on server with SHA-256 hashing
+- Regular usage: Stored locally in browser only
+
+API keys are never sent to third parties. No user data stored on servers (except encrypted API keys for automation). Built with Rust for memory safety.
 
 ## Performance
 
-- **20-30x faster** than JavaScript-based alternatives
-- **Memory efficient** with Rust's zero-cost abstractions
-- **Concurrent processing** with Tokio async runtime
-- **Optimized builds** with size-optimized WASM bundles
-- **Fast startup** with minimal dependencies
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
-
-### Development Setup
-
-1. Fork the repository
-2. Clone your fork
-3. Create a feature branch
-4. Make your changes
-5. Add tests if applicable
-6. Submit a pull request
-
-## Support
-
-If you find this project helpful and would like to support its development, consider buying me a coffee! Your support helps me continue improving Torbox Companion and building more open-source tools.
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-☕-yellow.svg)](https://buymeacoffee.com/crazy1)
-
-## Legal Disclaimer
-
-**IMPORTANT LEGAL NOTICE**
-
-This application is a **management tool** and **does not host, store, or distribute any content**. It is designed to interface with existing services and APIs for legitimate file management purposes only.
-
-### What This Application Does:
-- Provides a user interface for managing existing downloads
-- Interfaces with legitimate cloud storage services
-- Offers file organization and management tools
-- Connects to authorized APIs for data synchronization
-- Acts as an API proxy to forward requests to authorized services
-
-### What This Application Does NOT Do:
-- Host or store any copyrighted content
-- Distribute or share any files
-- Transmit or proxy streaming content (streams load directly from service provider's CDN)
-- Provide access to unauthorized content
-- Facilitate copyright infringement
-- Store or cache any user data beyond API keys
-- Cache or buffer any media content (video/audio files)
-
-### User Responsibility:
-Users are solely responsible for ensuring their use of this application complies with all applicable laws and regulations in their jurisdiction. This includes but is not limited to:
-- Respecting copyright laws
-- Obtaining proper authorization for any content
-- Complying with local regulations
-- Using the application for legitimate purposes only
-
-### No Liability:
-The developers of this application assume no responsibility for how users utilize this tool. Users must ensure their activities are legal and authorized in their jurisdiction.
-
-## DMCA Compliance
-
-Since no content is hosted, stored, transmitted, or cached on our servers, DMCA notices are not applicable to this application. All content delivery (including streaming) occurs directly between the user and the service provider's infrastructure. This application serves only as an interface and API proxy, forwarding requests without touching any actual media content.
-
-## Terms of Service
-
-By using this application, you agree to use it only for legitimate file management purposes and comply with all applicable laws.
-
-## Privacy Policy
-
-- **API Keys**: Stored locally in your browser only
-- **No Data Transmission**: No user data is sent to our servers
-- **No Information Collection**: We do not collect or store any user information
-- **Local Storage Only**: All data remains on your device
-- **No Tracking**: No analytics or tracking mechanisms
-
-### Public Instance Logging
-
-If using a publicly available instance of this application:
-- **Error Logging**: Server logs may contain error messages and debugging information
-- **No Personal Data**: Logs do not include API keys, user data, or personal information
-- **Technical Information Only**: Logs may include technical details like request paths, error codes, and timestamps
-- **Debugging Purposes**: Logging is used solely for application maintenance and error resolution
-
-## License
-
-[GNU Affero General Public License v3.0](https://choosealicense.com/licenses/agpl-3.0/)
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
-
-## Acknowledgments
-
-- **Original TorBox App**: This project is a complete rewrite of the original [TorBox Manager](https://github.com/jittarao/torbox-app) built with Next.js
-- **TorBox Team**: For providing the comprehensive API that makes this possible
+20-30x faster than JavaScript alternatives. Memory efficient with Rust's zero-cost abstractions. Concurrent processing via Tokio async runtime.
 
 ---
 
-**Built with ❤️ using Rust for the power user who demands performance and reliability.**
+## Contributing
+
+PRs welcome. For major changes, open an issue first.
+
+1. Fork the repo
+2. Create a feature branch
+3. Make your changes
+4. Submit a PR
+
+## Support
+
+If you find this useful, consider [buying me a coffee](https://buymeacoffee.com/crazy1).
+
+## Legal
+
+This is a management tool that does not host, store, or distribute content. It interfaces with existing services for file management.
+
+**What it does:**
+- UI for managing downloads
+- Interfaces with cloud storage services
+- API proxy for authorized services
+
+**What it doesn't do:**
+- Host or store copyrighted content
+- Distribute files
+- Cache media content
+- Provide unauthorized access
+
+Users are responsible for compliance with applicable laws. No liability assumed by developers.
+
+**DMCA:** Not applicable. No content hosted or cached. All delivery occurs directly between user and service provider.
+
+## Privacy
+
+**API Keys:**
+- Automation rules: Encrypted (AES-256-GCM), stored on server with SHA-256 hashing
+- Regular usage: Stored locally in browser only
+
+No data sent to third parties. No information collected beyond encrypted API keys for automation. No tracking.
+
+**Public Instance Logging:**
+Server logs contain error messages and technical details (paths, codes, timestamps) for debugging. No API keys, user data, or personal information in logs.
+
+## License
+
+[AGPL-3.0](https://choosealicense.com/licenses/agpl-3.0/)
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+## Acknowledgments
+
+Complete rewrite of the original [TorBox Manager](https://github.com/jittarao/torbox-app) in Rust. Thanks to the TorBox team for the API.

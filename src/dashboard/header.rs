@@ -1,9 +1,11 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "hydrate")]
 use web_sys;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "hydrate")]
 use wasm_bindgen::{self, JsCast};
+#[cfg(feature = "hydrate")]
+use js_sys;
 use crate::api::{TorboxClient, User};
 
 #[derive(Clone)]
@@ -43,10 +45,35 @@ pub fn DashboardHeader() -> impl IntoView {
             return "N/A".to_string();
         }
         
-        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&date_str) {
-            parsed.format("%B %d, %Y at %I:%M %p").to_string()
-        } else {
-            date_str
+        #[cfg(feature = "hydrate")]
+        {
+            if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&date_str) {
+                let utc_timestamp = parsed.timestamp_millis();
+                if let Some(window) = web_sys::window() {
+                    let js_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(utc_timestamp as f64));
+                    let month = js_date.get_month() as u32;
+                    let day = js_date.get_date() as u32;
+                    let year = js_date.get_full_year() as u32;
+                    let hours = js_date.get_hours() as u32;
+                    let minutes = js_date.get_minutes() as u32;
+                    let am_pm = if hours < 12 { "AM" } else { "PM" };
+                    let display_hours = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+                    let month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                    format!("{} {}, {} at {}:{:02} {}", month_names[month as usize], day, year, display_hours, minutes, am_pm)
+                } else {
+                    parsed.format("%B %d, %Y at %I:%M %p").to_string()
+                }
+            } else {
+                date_str
+            }
+        }
+        #[cfg(not(feature = "hydrate"))]
+        {
+            if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&date_str) {
+                parsed.format("%B %d, %Y at %I:%M %p").to_string()
+            } else {
+                date_str
+            }
         }
     };
     
@@ -244,6 +271,22 @@ pub fn DashboardHeader() -> impl IntoView {
                             base.to_string()
                         }}
                         style={move || {
+                            if active_tab.get() == "automations" {
+                                "color: var(--text-primary); background-color: var(--bg-tertiary);"
+                            } else {
+                                "color: var(--text-secondary);"
+                            }
+                        }}
+                        on:click=move |_| active_tab.set("automations".to_string())
+                    >
+                        "Automations"
+                    </button>
+                    <button 
+                        class={move || {
+                            let base = "px-4 py-2 text-sm font-medium rounded-lg transition-colors";
+                            base.to_string()
+                        }}
+                        style={move || {
                             if active_tab.get() == "themes" {
                                 "color: var(--text-primary); background-color: var(--bg-tertiary);"
                             } else {
@@ -343,6 +386,22 @@ pub fn DashboardHeader() -> impl IntoView {
                             }
                         >
                             "Overview"
+                        </button>
+                        <button
+                            class="block w-full text-left px-4 py-3 text-base font-medium"
+                            style={move || {
+                                if active_tab.get() == "automations" {
+                                    "color: var(--text-primary); background-color: var(--bg-tertiary);"
+                                } else {
+                                    "color: var(--text-secondary);"
+                                }
+                            }}
+                            on:click=move |_| {
+                                active_tab.set("automations".to_string());
+                                mobile_menu_open.set(false);
+                            }
+                        >
+                            "Automations"
                         </button>
                         <button
                             class="block w-full text-left px-4 py-3 text-base font-medium"

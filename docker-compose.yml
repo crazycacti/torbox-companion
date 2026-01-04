@@ -5,3 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TORBOX_MAX_RULES_PER_USER=100
+      - TORBOX_LOG_RETENTION_DAYS=90
+      - TORBOX_RULE_EXECUTION_TIMEOUT_SECS=130

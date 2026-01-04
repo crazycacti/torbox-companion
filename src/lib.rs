@@ -11,6 +11,9 @@ pub mod notifications;
 #[cfg(feature = "ssr")]
 pub mod logging;
 
+#[cfg(feature = "ssr")]
+pub mod automation;
+
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn hydrate() {
