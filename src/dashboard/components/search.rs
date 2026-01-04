@@ -11,6 +11,8 @@ use crate::api::TorboxClient;
 use crate::dashboard::DashboardContext;
 use crate::dashboard::components::loading_spinner::{LoadingSpinner, SpinnerSize, SpinnerVariant};
 use serde::{Serialize, Deserialize};
+use regex::Regex;
+use once_cell::sync::Lazy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum SearchType {
@@ -84,6 +86,345 @@ impl SearchResultItem {
             }
         }
     }
+
+    pub fn raw_title(&self) -> &str {
+        match self {
+            SearchResultItem::Torrent(t) => &t.raw_title,
+            SearchResultItem::Usenet(u) => &u.raw_title,
+        }
+    }
+
+    pub fn season(&self) -> Option<i32> {
+        match self {
+            SearchResultItem::Torrent(t) => {
+                t.title_parsed_data.as_ref()
+                    .and_then(|tpd| tpd.season)
+                    .or_else(|| extract_season_from_title(&t.raw_title))
+            }
+            SearchResultItem::Usenet(u) => {
+                u.title_parsed_data.as_ref()
+                    .and_then(|tpd| tpd.season)
+                    .or_else(|| extract_season_from_title(&u.raw_title))
+            }
+        }
+    }
+
+    pub fn episode(&self) -> Option<i32> {
+        match self {
+            SearchResultItem::Torrent(t) => {
+                t.title_parsed_data.as_ref()
+                    .and_then(|tpd| tpd.episode)
+                    .or_else(|| extract_episode_from_title(&t.raw_title))
+            }
+            SearchResultItem::Usenet(u) => {
+                u.title_parsed_data.as_ref()
+                    .and_then(|tpd| tpd.episode)
+                    .or_else(|| extract_episode_from_title(&u.raw_title))
+            }
+        }
+    }
+}
+
+static SEASON_PATTERNS: Lazy<[Regex; 20]> = Lazy::new(|| [
+    Regex::new(r"(?i)\bS(\d{1,2})\b").unwrap(),
+    Regex::new(r"(?i)Season\s*(\d{1,2})\b").unwrap(),
+    Regex::new(r"(?i)\[S(\d{1,2})\]").unwrap(),
+    Regex::new(r"(?i)\(S(\d{1,2})\)").unwrap(),
+    Regex::new(r"(?i)\.S(\d{2})\.").unwrap(),
+    Regex::new(r"(?i)_S(\d{2})_").unwrap(),
+    Regex::new(r"(?i)\s+S(\d{2})\s+").unwrap(),
+    Regex::new(r"(?i)\bS(\d{1,2})-S\d+").unwrap(),
+    Regex::new(r"(?i)Season\s*(\d{1,2})-\d+").unwrap(),
+    Regex::new(r"(?i)\bS(\d{1,2})\s+S\d+").unwrap(),
+    Regex::new(r"(?i)Season\s*(\d{1,2})\s+\d+").unwrap(),
+    Regex::new(r"(?i)\b(\d{1,2})x\d+").unwrap(),
+    Regex::new(r"(?i)\bS0?(\d{1,2})\b").unwrap(),
+    Regex::new(r"(?i)Season\s*0?(\d{1,2})\b").unwrap(),
+    Regex::new(r"(?i)\bS(\d{2})\b").unwrap(),
+    Regex::new(r"(?i)SEASON\s*(\d{1,2})\b").unwrap(),
+    Regex::new(r"(?i)Complete\s+Season\s*(\d{1,2})\b").unwrap(),
+    Regex::new(r"(?i)Season\s*(\d{1,2})\s+Complete").unwrap(),
+    Regex::new(r"(?i)\bS(\d{1,2})E\d+").unwrap(),
+    Regex::new(r"(?i)/\s*S(\d{1,2})").unwrap(),
+]);
+
+static EPISODE_PATTERNS: Lazy<[Regex; 15]> = Lazy::new(|| [
+    Regex::new(r"(?i)\bE(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)Episode\s*(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)\[E(\d{1,3})\]").unwrap(),
+    Regex::new(r"(?i)\(E(\d{1,3})\)").unwrap(),
+    Regex::new(r"(?i)\.E(\d{2,3})\.").unwrap(),
+    Regex::new(r"(?i)_E(\d{2,3})_").unwrap(),
+    Regex::new(r"(?i)\s+E(\d{2,3})\s+").unwrap(),
+    Regex::new(r"(?i)EP\s*(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)ep\s*(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)Ep\s*(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)\b(\d{1,2})x(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)EPISODE\s*(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)\bS\d+E(\d{1,3})\b").unwrap(),
+    Regex::new(r"(?i)\bS\d+E(\d{1,3})-E\d+").unwrap(),
+    Regex::new(r"(?i)/\s*E(\d{1,3})").unwrap(),
+]);
+
+fn extract_season_from_title(title: &str) -> Option<i32> {
+    let mut best_match: Option<i32> = None;
+    let mut best_position = title.len();
+    
+    for (idx, re) in SEASON_PATTERNS.iter().enumerate() {
+        if let Some(captures) = re.captures(title) {
+            if let Some(season_match) = captures.get(1) {
+                if let Ok(season_num) = season_match.as_str().parse::<i32>() {
+                    if season_num > 0 && season_num < 100 {
+                        let match_pos = season_match.start();
+                        let match_end = season_match.end();
+                        
+                        let should_skip = match idx {
+                            0 => {
+                                if match_end < title.len() {
+                                    let remaining = &title[match_end..];
+                                    let next_chars = remaining.chars().take(5).collect::<String>().to_lowercase();
+                                    next_chars.trim_start().starts_with("-") || 
+                                    next_chars.trim_start().starts_with("s") || 
+                                    next_chars.trim_start().starts_with("e")
+                                } else {
+                                    false
+                                }
+                            }
+                            1 => {
+                                if match_end < title.len() {
+                                    let remaining = &title[match_end..];
+                                    let next_chars = remaining.chars().take(5).collect::<String>().to_lowercase();
+                                    let trimmed = next_chars.trim_start();
+                                    trimmed.starts_with("-") || 
+                                    trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) ||
+                                    trimmed.starts_with("e")
+                                } else {
+                                    false
+                                }
+                            }
+                            4 | 5 | 6 => {
+                                if let Some(full_match) = captures.get(0) {
+                                    let full_match_end = full_match.end();
+                                    if full_match_end < title.len() {
+                                        let remaining = &title[full_match_end..];
+                                        let next_char = remaining.chars().next().map(|c| c.to_ascii_lowercase());
+                                        next_char == Some('s')
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => false,
+                        };
+                        
+                        if !should_skip && match_pos < best_position {
+                            best_match = Some(season_num);
+                            best_position = match_pos;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    best_match
+}
+
+fn extract_episode_from_title(title: &str) -> Option<i32> {
+    let mut best_match: Option<i32> = None;
+    let mut best_position = title.len();
+    
+    for (idx, re) in EPISODE_PATTERNS.iter().enumerate() {
+        if let Some(captures) = re.captures(title) {
+            let episode_match = if captures.len() > 2 {
+                captures.get(2)
+            } else {
+                captures.get(1)
+            };
+            
+            if let Some(episode_match) = episode_match {
+                if let Ok(episode_num) = episode_match.as_str().parse::<i32>() {
+                    if episode_num > 0 && episode_num < 1000 {
+                        let match_pos = episode_match.start();
+                        let match_end = episode_match.end();
+                        
+                        let should_skip = match idx {
+                            0 => {
+                                if match_end < title.len() {
+                                    let remaining = &title[match_end..];
+                                    let next_chars = remaining.chars().take(5).collect::<String>().to_lowercase();
+                                    next_chars.trim_start().starts_with("-") || 
+                                    next_chars.trim_start().starts_with("e")
+                                } else {
+                                    false
+                                }
+                            }
+                            1 => {
+                                if match_end < title.len() {
+                                    let remaining = &title[match_end..];
+                                    let next_chars = remaining.chars().take(5).collect::<String>().to_lowercase();
+                                    let trimmed = next_chars.trim_start();
+                                    trimmed.starts_with("-") || 
+                                    trimmed.chars().next().map_or(false, |c| c.is_ascii_digit())
+                                } else {
+                                    false
+                                }
+                            }
+                            4 | 5 | 6 => {
+                                if let Some(full_match) = captures.get(0) {
+                                    let full_match_end = full_match.end();
+                                    if full_match_end < title.len() {
+                                        let remaining = &title[full_match_end..];
+                                        let next_char = remaining.chars().next().map(|c| c.to_ascii_lowercase());
+                                        next_char == Some('e')
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => false,
+                        };
+                        
+                        if !should_skip && match_pos < best_position {
+                            best_match = Some(episode_num);
+                            best_position = match_pos;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    best_match
+}
+
+fn normalize_title_for_grouping(title: &str) -> String {
+    let mut normalized = title.to_lowercase();
+    
+    normalized = normalized.trim().to_string();
+    
+    normalized = normalized.replace("&", "and");
+    normalized = normalized.replace("+", "and");
+    normalized = normalized.replace("@", "at");
+    
+    normalized = normalized.replace("'", "");
+    normalized = normalized.replace("\"", "");
+    normalized = normalized.replace("`", "");
+    
+    normalized = normalized.replace(".", " ");
+    normalized = normalized.replace(",", " ");
+    normalized = normalized.replace(":", " ");
+    normalized = normalized.replace(";", " ");
+    normalized = normalized.replace("!", " ");
+    normalized = normalized.replace("?", " ");
+    normalized = normalized.replace("-", " ");
+    normalized = normalized.replace("–", " ");
+    normalized = normalized.replace("—", " ");
+    normalized = normalized.replace("_", " ");
+    
+    normalized = normalized.replace("[", " ");
+    normalized = normalized.replace("]", " ");
+    normalized = normalized.replace("(", " ");
+    normalized = normalized.replace(")", " ");
+    normalized = normalized.replace("{", " ");
+    normalized = normalized.replace("}", " ");
+    
+    normalized = normalized.replace("  ", " ");
+    while normalized.contains("  ") {
+        normalized = normalized.replace("  ", " ");
+    }
+    
+    normalized = normalized.trim().to_string();
+    
+    if normalized.is_empty() || normalized.len() < 2 {
+        title.to_lowercase().trim().to_string()
+    } else {
+        normalized
+    }
+}
+
+fn extract_base_title(title: &str) -> String {
+    let normalized = normalize_title_for_grouping(title);
+    
+    let re_season = Regex::new(r"(?i)\s*(?:season|s|seasons?)\s*\d+(?:\s*[-–—]\s*\d+)?\s*").unwrap();
+    let re_episode = Regex::new(r"(?i)\s*(?:episode|ep|e|episodes?)\s*\d+(?:\s*[-–—]\s*\d+)?\s*").unwrap();
+    let re_sxxexx = Regex::new(r"(?i)\s*s\d+e\d+(?:[-–—]e\d+)?\s*").unwrap();
+    let re_year = Regex::new(r"\s*\(\d{4}\)\s*").unwrap();
+    let re_year_standalone = Regex::new(r"\s+\d{4}\s+").unwrap();
+    let re_resolution = Regex::new(r"(?i)\s*\d+p\s*").unwrap();
+    let re_quality = Regex::new(r"(?i)\s*(?:web-?dl|bluray|dvdrip|hdtv|webrip|brrip|bdrip|dvd|bd|remux|uhd|4k)\s*").unwrap();
+    let re_codec = Regex::new(r"(?i)\s*(?:x264|x265|h\.?264|h\.?265|hevc|avc|divx|xvid|av1|vp9)\s*").unwrap();
+    let re_group = Regex::new(r"(?i)\s*\[[^\]]+\]\s*").unwrap();
+    let re_hash = Regex::new(r"\s*[a-f0-9]{32,40}\s*").unwrap();
+    let re_audio = Regex::new(r"(?i)\s*(?:dts|ac3|aac|mp3|flac|dolby|truehd|ddp|dd|eac3|atmos|dts-?hd|ma)\s*").unwrap();
+    let re_encoder = Regex::new(r"(?i)\s*(?:rarbg|ettv|eztv|yify|yts|amzn|nf|dsnp|dsny|hulu|hmax|atvp|hbo|max|d+\.?web|web-?dl|complete|uncensored|censored)\s*").unwrap();
+    let re_format = Regex::new(r"(?i)\s*(?:mkv|mp4|avi|m4v|mov|wmv|flv|mpeg|mpg)\s*").unwrap();
+    let re_size = Regex::new(r"\s*\d+\.?\d*\s*(?:gb|mb|tb|kb)\s*").unwrap();
+    let re_repack = Regex::new(r"(?i)\s*(?:repack|proper|rerip|real|final|v2|v3|v4|v5)\s*").unwrap();
+    let re_edition = Regex::new(r"(?i)\s*(?:director['s]?\s*cut|extended|unrated|theatrical|uncut|cut|edition|version)\s*").unwrap();
+    let re_language = Regex::new(r"(?i)\s*(?:ita|eng|spa|fra|deu|rus|jpn|chi|kor|multi|dub|sub|subs?)\s*").unwrap();
+    let re_complete = Regex::new(r"(?i)\s*(?:complete|full|entire|all|pack|collection|box\s*set)\s*").unwrap();
+    let re_extra = Regex::new(r"(?i)\s*(?:extras?|specials?|bonus|featurettes?|deleted\s*scenes?)\s*").unwrap();
+    
+    let mut base = normalized.clone();
+    
+    base = re_sxxexx.replace_all(&base, " ").to_string();
+    base = re_season.replace_all(&base, " ").to_string();
+    base = re_episode.replace_all(&base, " ").to_string();
+    base = re_year.replace_all(&base, " ").to_string();
+    {
+        let base_clone = base.clone();
+        base = re_year_standalone.replace_all(&base_clone, |caps: &regex::Captures| {
+            if let Some(matched) = caps.get(0) {
+                let match_end = matched.end();
+                if match_end <= base_clone.len() {
+                    let remaining_text = &base_clone[match_end..];
+                    let next_chars = remaining_text.chars().take(3).collect::<String>().to_lowercase();
+                    if next_chars.starts_with("p") || next_chars.starts_with("gb") || 
+                       next_chars.starts_with("mb") || next_chars.starts_with("tb") {
+                        matched.as_str().to_string()
+                    } else {
+                        " ".to_string()
+                    }
+                } else {
+                    " ".to_string()
+                }
+            } else {
+                " ".to_string()
+            }
+        }).to_string();
+    }
+    base = re_resolution.replace_all(&base, " ").to_string();
+    base = re_quality.replace_all(&base, " ").to_string();
+    base = re_codec.replace_all(&base, " ").to_string();
+    base = re_audio.replace_all(&base, " ").to_string();
+    base = re_encoder.replace_all(&base, " ").to_string();
+    base = re_format.replace_all(&base, " ").to_string();
+    base = re_size.replace_all(&base, " ").to_string();
+    base = re_repack.replace_all(&base, " ").to_string();
+    base = re_edition.replace_all(&base, " ").to_string();
+    base = re_language.replace_all(&base, " ").to_string();
+    base = re_complete.replace_all(&base, " ").to_string();
+    base = re_extra.replace_all(&base, " ").to_string();
+    base = re_group.replace_all(&base, " ").to_string();
+    base = re_hash.replace_all(&base, " ").to_string();
+    
+    base = base.replace("  ", " ");
+    while base.contains("  ") {
+        base = base.replace("  ", " ");
+    }
+    
+    base = base.trim().to_string();
+    
+    if base.is_empty() || base.len() < 2 {
+        normalized
+    } else {
+        base
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -131,7 +472,7 @@ pub fn SearchComponent() -> impl IntoView {
                             _ => SearchType::Torrents,
                         };
                         
-                        let final_type = if let Some(user) = user_data_load.get() {
+                        let final_type = if let Some(user) = user_data_load.get_untracked() {
                             let has_plan = user.plan == 2;
                             if !has_plan && (loaded_type == SearchType::Usenet || loaded_type == SearchType::Both) {
                                 let _ = storage.set_item("search_type_preference", "torrents");
@@ -297,6 +638,7 @@ pub fn SearchComponent() -> impl IntoView {
         let results_signal = search_results.clone();
         let error_signal = search_error.clone();
         let is_searching_signal = is_searching.clone();
+        let expanded_groups_signal = expanded_groups.clone();
         
         let has_plan_2_value = has_plan_2();
         spawn_local(async move {
@@ -513,7 +855,34 @@ pub fn SearchComponent() -> impl IntoView {
                                 
                                 // Get displayed count before moving all_results
                                 let displayed_count = all_results.len() as i32;
-                                results_signal.set(all_results);
+                                results_signal.set(all_results.clone());
+                                
+                                // Auto-expand all title groups by extracting unique titles
+                                if !all_results.is_empty() {
+                                    expanded_groups_signal.update(|set| {
+                                        set.clear();
+                                        let mut title_keys = std::collections::HashSet::new();
+                                        for item in &all_results {
+                                            let parsed_title = item.parsed_title();
+                                            let raw_title = item.raw_title();
+                                            
+                                            let base_title = extract_base_title(&parsed_title);
+                                            let base_title_from_raw = extract_base_title(raw_title);
+                                            
+                                            let title_key = if !base_title.is_empty() && base_title.len() > 3 {
+                                                base_title
+                                            } else if !base_title_from_raw.is_empty() && base_title_from_raw.len() > 3 {
+                                                base_title_from_raw
+                                            } else {
+                                                normalize_title_for_grouping(&parsed_title)
+                                            };
+                                            
+                                            title_keys.insert(title_key.to_lowercase());
+                                        }
+                                        *set = title_keys;
+                                    });
+                                }
+                                
                                 // Update total count - use displayed results count if API doesn't provide accurate total
                                 total_results_count.set(if total_count > 0 { total_count } else { displayed_count });
                                 if has_error {
@@ -605,9 +974,7 @@ pub fn SearchComponent() -> impl IntoView {
                     if let Some(window) = web_sys::window() {
                         let clipboard = window.navigator().clipboard();
                         let promise = clipboard.write_text(&magnet);
-                        if let Ok(_) = JsFuture::from(promise).await {
-                            web_sys::console::log_1(&"Magnet link copied to clipboard!".into());
-                        }
+                        let _ = JsFuture::from(promise).await;
                     }
                 }
             }
@@ -622,9 +989,7 @@ pub fn SearchComponent() -> impl IntoView {
                 if let Some(window) = web_sys::window() {
                     let clipboard = window.navigator().clipboard();
                     let promise = clipboard.write_text(&hash);
-                    if let Ok(_) = JsFuture::from(promise).await {
-                        web_sys::console::log_1(&"Hash copied to clipboard!".into());
-                    }
+                    let _ = JsFuture::from(promise).await;
                 }
             }
         });
@@ -638,9 +1003,7 @@ pub fn SearchComponent() -> impl IntoView {
                     if let Some(window) = web_sys::window() {
                         let clipboard = window.navigator().clipboard();
                         let promise = clipboard.write_text(&nzb);
-                        if let Ok(_) = JsFuture::from(promise).await {
-                            web_sys::console::log_1(&"NZB link copied to clipboard!".into());
-                        }
+                        let _ = JsFuture::from(promise).await;
                     }
                 }
             }
@@ -694,21 +1057,64 @@ pub fn SearchComponent() -> impl IntoView {
         results
     };
     
+    #[derive(Clone)]
+    struct TitleGroup {
+        title: String,
+        items: Vec<SearchResultItem>,
+    }
+
     let grouped_results = move || {
         let results = sorted_results();
-        let mut groups: std::collections::HashMap<String, (String, Vec<SearchResultItem>)> = std::collections::HashMap::new();
+        let mut title_groups: std::collections::HashMap<String, TitleGroup> = std::collections::HashMap::new();
         
         for item in results {
             let parsed_title = item.parsed_title();
-            let group_key = parsed_title.to_lowercase();
-            let entry = groups.entry(group_key).or_insert_with(|| (parsed_title.clone(), Vec::new()));
-            entry.1.push(item);
+            let raw_title = item.raw_title();
+            
+            let base_title = extract_base_title(&parsed_title);
+            let base_title_from_raw = extract_base_title(raw_title);
+            
+            let title_key = if !base_title.is_empty() && base_title.len() > 3 {
+                base_title
+            } else if !base_title_from_raw.is_empty() && base_title_from_raw.len() > 3 {
+                base_title_from_raw
+            } else {
+                normalize_title_for_grouping(&parsed_title)
+            };
+            
+            let display_title = if !parsed_title.is_empty() && parsed_title.len() > 3 {
+                parsed_title
+            } else if !raw_title.is_empty() {
+                let cleaned = extract_base_title(raw_title);
+                if !cleaned.is_empty() && cleaned.len() > 3 {
+                    cleaned
+                } else {
+                    raw_title.to_string()
+                }
+            } else {
+                title_key.clone()
+            };
+            
+            let title_group = title_groups.entry(title_key.clone())
+                .or_insert_with(|| TitleGroup {
+                    title: display_title.clone(),
+                    items: Vec::new(),
+                });
+            
+            if display_title.len() > title_group.title.len() && 
+               display_title != title_key && 
+               !display_title.is_empty() {
+                title_group.title = display_title.clone();
+            }
+            
+            title_group.items.push(item);
         }
         
-        let mut grouped: Vec<(String, Vec<SearchResultItem>)> = groups.into_iter()
-            .map(|(_, (title, items))| (title, items))
+        let mut grouped: Vec<TitleGroup> = title_groups.into_iter()
+            .map(|(_, title_group)| title_group)
             .collect();
-        grouped.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        grouped.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        
         grouped
     };
     
@@ -722,6 +1128,21 @@ pub fn SearchComponent() -> impl IntoView {
             }
         });
     };
+
+    let expand_all = move || {
+        let results = grouped_results();
+        expanded_groups.update(|set| {
+            set.clear();
+            for title_group in &results {
+                set.insert(title_group.title.to_lowercase());
+            }
+        });
+    };
+    
+    let collapse_all = move || {
+        expanded_groups.update(|set| set.clear());
+    };
+
     
     let toggle_sort = move |field: SortField| {
         if sort_field.get() == field {
@@ -808,13 +1229,15 @@ pub fn SearchComponent() -> impl IntoView {
                             <Show when=move || is_searching.get()>
                                 <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Default/>
                             </Show>
-                            {move || if is_searching.get() { "Searching..." } else { "Search" }.to_string()}
+                            <Show when=move || !is_searching.get()>
+                                "Search"
+                            </Show>
                         </button>
                     </div>
                     
                     <div class="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                        <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
-                            <span class="text-xs sm:text-sm font-medium shrink-0" style="color: var(--text-secondary);">"Type:"</span>
+                        <div class="flex items-center w-full sm:w-auto">
+                            <span class="text-xs sm:text-sm font-medium shrink-0" style="color: var(--text-secondary); margin-right: 0.5rem;">"Type:"</span>
                             <div class="flex gap-0.5 rounded-lg" style="background-color: var(--bg-secondary); border: 1px solid var(--border-secondary);">
                             <button
                                 class="px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition-all min-h-[36px] sm:min-h-0"
@@ -934,7 +1357,7 @@ pub fn SearchComponent() -> impl IntoView {
                             <LoadingSpinner 
                                 size=SpinnerSize::Medium 
                                 variant=SpinnerVariant::Accent 
-                                text="Searching...".to_string()
+                                text=" Searching...".to_string()
                                 centered=true
                             />
                         </div>
@@ -957,6 +1380,28 @@ pub fn SearchComponent() -> impl IntoView {
                                     }
                                 }}
                             </span>
+                            <div class="flex items-center gap-2">
+                                <button
+                                    class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all rounded-md hover:opacity-80"
+                                    style="background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-secondary);"
+                                    on:click=move |_| expand_all()
+                                >
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                    "Expand All"
+                                </button>
+                                <button
+                                    class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all rounded-md hover:opacity-80"
+                                    style="background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-secondary);"
+                                    on:click=move |_| collapse_all()
+                                >
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
+                                    </svg>
+                                    "Collapse All"
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="overflow-x-auto" style="max-height: 500px; overflow-y: auto;">
@@ -1027,16 +1472,19 @@ pub fn SearchComponent() -> impl IntoView {
                             </thead>
                         <tbody>
                             {move || {
-                                grouped_results().into_iter().map(|(group_title, items)| {
-                                    let group_title_clone = group_title.clone();
-                                    let group_title_for_toggle = group_title.clone();
-                                    let group_title_lower = group_title.to_lowercase();
-                                    let group_title_lower2 = group_title_lower.clone();
+                                grouped_results().into_iter().map(|title_group| {
+                                    let title_clone = title_group.title.clone();
+                                    let title_for_toggle = title_group.title.clone();
+                                    let title_lower = title_group.title.to_lowercase();
+                                    let title_lower2 = title_lower.clone();
                                     let expanded_groups_clone = expanded_groups.clone();
                                     let expanded_groups_clone2 = expanded_groups.clone();
-                                    let is_expanded = move || expanded_groups_clone.get().contains(&group_title_lower);
-                                    let is_expanded2 = move || expanded_groups_clone2.get().contains(&group_title_lower2);
-                                    let items_count = items.len();
+                                    let is_title_expanded = move || expanded_groups_clone.get().contains(&title_lower);
+                                    let is_title_expanded2 = move || expanded_groups_clone2.get().contains(&title_lower2);
+                                    
+                                    let total_items_count: usize = title_group.items.len();
+                                    
+                                    let title_group_items = title_group.items.clone();
                                     let downloading_items_clone = downloading_items.clone();
                                     let handle_download_clone = handle_download.clone();
                                     let handle_copy_magnet_clone = handle_copy_magnet.clone();
@@ -1046,13 +1494,13 @@ pub fn SearchComponent() -> impl IntoView {
                                             <tr
                                                 class="border-b transition-colors cursor-pointer hover:bg-opacity-10"
                                                 style="border-color: var(--border-secondary); background-color: var(--bg-secondary);"
-                                                on:click=move |_| toggle_group(group_title_for_toggle.clone())
+                                                on:click=move |_| toggle_group(title_for_toggle.clone())
                                             >
                                                 <td class="px-4 md:px-6 py-3" colspan="5" style="color: var(--text-primary);">
                                                     <div class="flex items-center gap-3">
                                                         <svg
                                                             class="w-5 h-5 transition-transform"
-                                                            style={move || if is_expanded() { "transform: rotate(90deg);" } else { "transform: rotate(0deg);" }}
+                                                            style={move || if is_title_expanded() { "transform: rotate(90deg);" } else { "transform: rotate(0deg);" }}
                                                             fill="none"
                                                             stroke="currentColor"
                                                             viewBox="0 0 24 24"
@@ -1060,80 +1508,81 @@ pub fn SearchComponent() -> impl IntoView {
                                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                                         </svg>
                                                         <span class="font-semibold text-base" style="color: var(--text-primary);">
-                                                            {group_title_clone.clone()}
+                                                            {title_clone.clone()}
                                                         </span>
                                                         <span class="text-sm" style="color: var(--text-secondary);">
-                                                            {format!("({} result{})", items_count, if items_count == 1 { "" } else { "s" })}
+                                                            {format!("({} result{})", total_items_count, if total_items_count == 1 { "" } else { "s" })}
                                                         </span>
                                                     </div>
                                                 </td>
                                             </tr>
-                                            {move || {
-                                                if is_expanded2() {
-                                                    let items_clone = items.clone();
-                                                    items_clone.into_iter().map(|item| {
-                                                        let item_download = item.clone();
-                                                        let item_magnet_check = item.clone();
-                                                        let item_copy_magnet = item.clone();
-                                                        let item_title = item.clone();
-                                                        let item_title_for_raw = item.clone();
-                                                        let item_size = item.clone();
-                                                        let item_seeders = item.clone();
-                                                        let item_type = item.clone();
-                                                        
-                                                        let (details, is_cached): (Vec<String>, bool) = match &item {
-                                                            SearchResultItem::Torrent(t) => {
-                                                                let cached = t.cached.unwrap_or(false);
-                                                                let d = if let Some(tpd) = &t.title_parsed_data {
-                                                                    let mut d = Vec::new();
-                                                                    if let Some(res) = &tpd.resolution {
-                                                                        d.push(res.clone());
-                                                                    }
-                                                                    if let Some(qual) = &tpd.quality {
-                                                                        d.push(qual.clone());
-                                                                    }
-                                                                    if let Some(codec) = &tpd.codec {
-                                                                        d.push(codec.clone());
-                                                                    }
-                                                                    if let Some(season) = tpd.season {
-                                                                        d.push(format!("S{:02}", season));
-                                                                    }
-                                                                    d
-                                                                } else {
-                                                                    Vec::new()
-                                                                };
-                                                                (d, cached)
-                                                            }
-                                                            SearchResultItem::Usenet(u) => {
-                                                                let cached = u.cached.unwrap_or(false);
-                                                                let d = if let Some(tpd) = &u.title_parsed_data {
-                                                                    let mut d = Vec::new();
-                                                                    if let Some(res) = &tpd.resolution {
-                                                                        d.push(res.clone());
-                                                                    }
-                                                                    if let Some(qual) = &tpd.quality {
-                                                                        d.push(qual.clone());
-                                                                    }
-                                                                    if let Some(codec) = &tpd.codec {
-                                                                        d.push(codec.clone());
-                                                                    }
-                                                                    if let Some(season) = tpd.season {
-                                                                        d.push(format!("S{:02}", season));
-                                                                    }
-                                                                    d
-                                                                } else {
-                                                                    Vec::new()
-                                                                };
-                                                                (d, cached)
-                                                            }
-                                                        };
-                                                        let has_details = !details.is_empty();
-                                                        let details_for_view = details.clone();
-                                                        let cached_for_view = is_cached;
-                                                        let has_magnet = item_magnet_check.magnet().is_some();
-                                                        let item_copy_for_magnet = item_copy_magnet.clone();
-                                                        
-                                                        view! {
+                                            {
+                                                move || {
+                                                    if is_title_expanded2() {
+                                                        title_group_items.iter().map(|item| {
+                                                            let item = item.clone();
+                                                            let item_download = item.clone();
+                                                            let item_magnet_check = item.clone();
+                                                            let item_copy_magnet = item.clone();
+                                                            let item_title = item.clone();
+                                                            let item_title_for_raw = item.clone();
+                                                            let item_size = item.clone();
+                                                            let item_seeders = item.clone();
+                                                            let item_type = item.clone();
+                                                            
+                                                            let (details, is_cached): (Vec<String>, bool) = match &item {
+                                                                SearchResultItem::Torrent(t) => {
+                                                                    let cached = t.cached.unwrap_or(false);
+                                                                    let d = if let Some(tpd) = &t.title_parsed_data {
+                                                                        let mut d = Vec::new();
+                                                                        if let Some(res) = &tpd.resolution {
+                                                                            d.push(res.clone());
+                                                                        }
+                                                                        if let Some(qual) = &tpd.quality {
+                                                                            d.push(qual.clone());
+                                                                        }
+                                                                        if let Some(codec) = &tpd.codec {
+                                                                            d.push(codec.clone());
+                                                                        }
+                                                                        if let Some(season) = tpd.season {
+                                                                            d.push(format!("S{:02}", season));
+                                                                        }
+                                                                        d
+                                                                    } else {
+                                                                        Vec::new()
+                                                                    };
+                                                                    (d, cached)
+                                                                }
+                                                                SearchResultItem::Usenet(u) => {
+                                                                    let cached = u.cached.unwrap_or(false);
+                                                                    let d = if let Some(tpd) = &u.title_parsed_data {
+                                                                        let mut d = Vec::new();
+                                                                        if let Some(res) = &tpd.resolution {
+                                                                            d.push(res.clone());
+                                                                        }
+                                                                        if let Some(qual) = &tpd.quality {
+                                                                            d.push(qual.clone());
+                                                                        }
+                                                                        if let Some(codec) = &tpd.codec {
+                                                                            d.push(codec.clone());
+                                                                        }
+                                                                        if let Some(season) = tpd.season {
+                                                                            d.push(format!("S{:02}", season));
+                                                                        }
+                                                                        d
+                                                                    } else {
+                                                                        Vec::new()
+                                                                    };
+                                                                    (d, cached)
+                                                                }
+                                                            };
+                                                            let has_details = !details.is_empty();
+                                                            let details_for_view = details.clone();
+                                                            let cached_for_view = is_cached;
+                                                            let has_magnet = item_magnet_check.magnet().is_some();
+                                                            let item_copy_for_magnet = item_copy_magnet.clone();
+                                                            
+                                                            view! {
                                                             <tr
                                                                 class="border-b transition-colors hover:bg-opacity-5"
                                                                 style="border-color: var(--border-secondary);"

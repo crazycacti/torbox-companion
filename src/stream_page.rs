@@ -63,6 +63,17 @@ pub fn StreamPage() -> impl IntoView {
                 justify-content: space-between;
                 align-items: center;
                 pointer-events: none;
+                opacity: 0;
+                transition: opacity 200ms ease;
+            }
+            
+            .player-container:hover .player-header,
+            .player-container.controls-visible .player-header {
+                opacity: 1;
+            }
+            
+            .player-container.controls-hidden .player-header {
+                opacity: 0;
             }
 
             .player-header > * {
@@ -121,6 +132,21 @@ pub fn StreamPage() -> impl IntoView {
                 position: absolute;
                 top: 8px;
                 left: 8px;
+                touch-action: manipulation;
+                -webkit-tap-highlight-color: transparent;
+            }
+            
+            @media (max-width: 768px) {
+                .video-wrapper {
+                    padding: 0;
+                }
+                
+                video {
+                    width: 100%;
+                    height: 100%;
+                    top: 0;
+                    left: 0;
+                }
             }
 
             .controls-overlay {
@@ -137,9 +163,21 @@ pub fn StreamPage() -> impl IntoView {
             }
 
             .player-container:hover .controls-overlay,
-            .player-container.controls-visible .controls-overlay {
+            .player-container.controls-visible .controls-overlay,
+            .player-container.touch-device .controls-overlay {
                 opacity: 1;
                 pointer-events: all;
+            }
+            
+            @media (hover: none) and (pointer: coarse) {
+                .player-container .controls-overlay {
+                    opacity: 1;
+                    pointer-events: all;
+                }
+                
+                .player-container.controls-hidden .controls-overlay {
+                    opacity: 0;
+                }
             }
 
             .progress-wrapper {
@@ -154,10 +192,19 @@ pub fn StreamPage() -> impl IntoView {
                 border-radius: 2px;
                 cursor: pointer;
                 transition: height 100ms;
+                touch-action: none;
+                -webkit-tap-highlight-color: transparent;
             }
 
             .progress-container:hover {
                 height: 6px;
+            }
+            
+            @media (hover: none) and (pointer: coarse) {
+                .progress-container {
+                    height: 8px;
+                    padding: 4px 0;
+                }
             }
 
             .progress-buffer {
@@ -168,6 +215,7 @@ pub fn StreamPage() -> impl IntoView {
                 background: rgba(255, 255, 255, 0.3);
                 border-radius: 2px;
                 width: 0%;
+                z-index: 0;
             }
 
             .progress-bar {
@@ -179,6 +227,7 @@ pub fn StreamPage() -> impl IntoView {
                 border-radius: 2px;
                 width: 0%;
                 transition: width 0.1s linear;
+                z-index: 2;
             }
 
             .progress-hover {
@@ -191,10 +240,20 @@ pub fn StreamPage() -> impl IntoView {
                 border-radius: 2px;
                 opacity: 0;
                 transition: opacity 100ms;
+                pointer-events: none;
+                z-index: 1;
+                visibility: hidden;
             }
 
             .progress-container:hover .progress-hover {
                 opacity: 1;
+                visibility: visible;
+            }
+            
+            @media (hover: none) and (pointer: coarse) {
+                .progress-hover {
+                    display: none !important;
+                }
             }
 
             .controls-bar {
@@ -241,6 +300,9 @@ pub fn StreamPage() -> impl IntoView {
                 width: 48px;
                 height: 48px;
                 position: relative;
+                touch-action: manipulation;
+                -webkit-tap-highlight-color: transparent;
+                user-select: none;
             }
 
             .control-btn:hover {
@@ -293,6 +355,13 @@ pub fn StreamPage() -> impl IntoView {
             .volume-container.show-slider .volume-slider-wrapper {
                 width: 80px;
             }
+            
+            @media (hover: none) and (pointer: coarse) {
+                .volume-container .volume-slider-wrapper {
+                    width: 80px;
+                    display: flex;
+                }
+            }
 
             .volume-slider {
                 width: 80px;
@@ -302,6 +371,15 @@ pub fn StreamPage() -> impl IntoView {
                 cursor: pointer;
                 position: relative;
                 flex-shrink: 0;
+                touch-action: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+            
+            @media (hover: none) and (pointer: coarse) {
+                .volume-slider {
+                    height: 6px;
+                    padding: 4px 0;
+                }
             }
 
             .volume-slider-fill {
@@ -432,24 +510,52 @@ pub fn StreamPage() -> impl IntoView {
                     min-width: 100%;
                 }
 
-                .volume-slider-wrapper {
-                    display: none;
-                }
-
                 .time-display {
                     font-size: 12px;
                     min-width: 70px;
                 }
 
                 .control-btn {
-                    width: 40px;
-                    height: 40px;
-                    padding: 6px;
+                    width: 44px;
+                    height: 44px;
+                    padding: 8px;
+                    min-width: 44px;
+                    min-height: 44px;
                 }
 
                 .control-btn svg {
-                    width: 20px;
-                    height: 20px;
+                    width: 22px;
+                    height: 22px;
+                }
+                
+                .controls-bar {
+                    padding: 12px 8px 16px;
+                }
+                
+                .progress-wrapper {
+                    padding: 0 8px 12px;
+                }
+                
+                .player-header {
+                    padding: 8px 12px;
+                }
+                
+                .player-header h1 {
+                    font-size: 13px;
+                }
+                
+                .close-btn {
+                    width: 36px;
+                    height: 36px;
+                }
+            }
+            
+            @media (hover: none) and (pointer: coarse) {
+                .control-btn {
+                    width: 48px;
+                    height: 48px;
+                    min-width: 48px;
+                    min-height: 48px;
                 }
             }
 
@@ -466,8 +572,8 @@ pub fn StreamPage() -> impl IntoView {
             <div class="player-container" id="player-container">
                 <div class="player-header">
                         <h1>"TorBox Stream Player"</h1>
-                        <button class="close-btn" onclick="window.close()" title="Close (Esc)">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <button class="close-btn" onclick="window.close()" title="Close (Esc)" aria-label="Close player">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </button>
@@ -491,26 +597,26 @@ pub fn StreamPage() -> impl IntoView {
                             
                             <div class="controls-bar">
                                 <div class="controls-left">
-                                    <button class="control-btn play-pause" id="play-pause-btn" title="Play/Pause (Space)">
-                                        <svg id="play-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <button class="control-btn play-pause" id="play-pause-btn" title="Play/Pause (Space)" aria-label="Play or pause video">
+                                        <svg id="play-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
-                                        <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;">
+                                        <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;" aria-hidden="true">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                         </svg>
                                     </button>
                                     
                                     <div class="volume-container" id="volume-container">
-                                        <button class="control-btn" id="mute-btn" title="Mute (M)">
-                                            <svg id="volume-high-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <button class="control-btn" id="mute-btn" title="Mute (M)" aria-label="Mute or unmute audio">
+                                            <svg id="volume-high-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                                             </svg>
-                                            <svg id="volume-low-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;">
+                                            <svg id="volume-low-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;" aria-hidden="true">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
                                             </svg>
-                                            <svg id="volume-muted-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;">
+                                            <svg id="volume-muted-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;" aria-hidden="true">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M17 10l2-2m0 0l2-2" />
                                             </svg>
@@ -552,11 +658,11 @@ pub fn StreamPage() -> impl IntoView {
                                         </div>
                                     </div>
                                     
-                                    <button class="control-btn" id="fullscreen-btn" title="Fullscreen (F)">
-                                        <svg id="fullscreen-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <button class="control-btn" id="fullscreen-btn" title="Fullscreen (F)" aria-label="Enter or exit fullscreen">
+                                        <svg id="fullscreen-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                                         </svg>
-                                        <svg id="fullscreen-exit-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;">
+                                        <svg id="fullscreen-exit-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" style="display: none;" aria-hidden="true">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                                         </svg>
                                     </button>
@@ -583,6 +689,12 @@ pub fn StreamPage() -> impl IntoView {
                     let controlsTimeout = null;
                     let isDragging = false;
                     let hoverTimeout = null;
+                    let isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+                    let touchStartX = 0;
+                    let touchStartY = 0;
+                    let touchStartTime = 0;
+                    let lastTapTime = 0;
+                    let tapTimeout = null;
 
                     if (metadataJson) {
                         try {
@@ -657,21 +769,37 @@ pub fn StreamPage() -> impl IntoView {
                     function showControls() {
                         const container = document.getElementById('player-container');
                         container.classList.add('controls-visible');
+                        container.classList.remove('controls-hidden');
                         clearTimeout(controlsTimeout);
-                        controlsTimeout = setTimeout(() => {
-                            if (!isDragging && currentVideo && !currentVideo.paused) {
-                                container.classList.remove('controls-visible');
-                            }
-                        }, 3000);
+                        if (!isTouchDevice) {
+                            controlsTimeout = setTimeout(() => {
+                                if (!isDragging && currentVideo && !currentVideo.paused) {
+                                    container.classList.remove('controls-visible');
+                                }
+                            }, 3000);
+                        } else {
+                            controlsTimeout = setTimeout(() => {
+                                if (!isDragging && currentVideo && !currentVideo.paused) {
+                                    container.classList.add('controls-hidden');
+                                }
+                            }, 4000);
+                        }
                     }
 
                     function hideControls() {
-                        if (!isDragging && currentVideo && !currentVideo.paused) {
-                            clearTimeout(hoverTimeout);
-                            hoverTimeout = setTimeout(() => {
-                                document.getElementById('player-container').classList.remove('controls-visible');
-                            }, 2000);
+                        if (!isTouchDevice) {
+                            if (!isDragging && currentVideo && !currentVideo.paused) {
+                                clearTimeout(hoverTimeout);
+                                hoverTimeout = setTimeout(() => {
+                                    document.getElementById('player-container').classList.remove('controls-visible');
+                                }, 2000);
+                            }
                         }
+                    }
+                    
+                    if (isTouchDevice) {
+                        const container = document.getElementById('player-container');
+                        container.classList.add('touch-device');
                     }
 
                     function updateStreamUrl(newUrl) {
@@ -679,15 +807,29 @@ pub fn StreamPage() -> impl IntoView {
                         
                         document.getElementById('loading-overlay').classList.add('active');
                         
+                        const savedAudioIndex = currentAudioIndex;
+                        const savedSubtitleIndex = currentSubtitleIndex;
+                        
                         hlsInstance.destroy();
                         hlsInstance = new Hls({
                             enableWorker: true,
                             lowLatencyMode: false,
+                            startLevel: -1,
+                            capLevelToPlayerSize: true,
                         });
                         hlsInstance.loadSource(newUrl);
                         hlsInstance.attachMedia(currentVideo);
                         
                         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                            if (hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
+                                let targetIndex = savedAudioIndex;
+                                if (targetIndex === null || targetIndex < 0 || targetIndex >= hlsInstance.audioTracks.length) {
+                                    targetIndex = 0;
+                                }
+                                hlsInstance.audioTrack = targetIndex;
+                                currentAudioIndex = targetIndex;
+                                console.log('Set audio track in updateStreamUrl to:', targetIndex);
+                            }
                             document.getElementById('loading-overlay').classList.remove('active');
                             enableSubtitlesFromStream();
                             currentVideo.play().catch(e => console.error('Play error:', e));
@@ -708,21 +850,78 @@ pub fn StreamPage() -> impl IntoView {
                         
                         audioSelectSettings.innerHTML = '';
                         if (metadata && metadata.audios) {
+                            let defaultArrayIndex = -1;
+                            let englishIndex = -1;
+                            
                             metadata.audios.forEach((audio, idx) => {
                                 const option = document.createElement('option');
                                 option.value = idx;
                                 option.textContent = `${audio.language_full || audio.language}${audio.title ? ' - ' + audio.title : ''} (${audio.channel_layout || audio.channels + 'ch'})`;
-                                if (audio.default) {
-                                    option.selected = true;
-                                    currentAudioIndex = idx;
+                                
+                                if (audio.language === 'eng' || audio.language === 'en' || (audio.language_full && audio.language_full.toLowerCase().includes('english'))) {
+                                    englishIndex = idx;
                                 }
+                                
                                 audioSelectSettings.appendChild(option);
                             });
+                            
+                            if (englishIndex >= 0) {
+                                const englishOption = audioSelectSettings.options[englishIndex];
+                                if (englishOption) {
+                                    englishOption.selected = true;
+                                    defaultArrayIndex = englishIndex;
+                                    console.log('Defaulting to English audio track at array index:', englishIndex);
+                                }
+                            } else if (metadata.audios.length > 0) {
+                                const firstOption = audioSelectSettings.options[0];
+                                if (firstOption) {
+                                    firstOption.selected = true;
+                                    defaultArrayIndex = 0;
+                                    console.log('No English track found, using first track at index:', 0);
+                                }
+                            }
+                            
+                            if (defaultArrayIndex >= 0) {
+                                currentAudioIndex = defaultArrayIndex;
+                                console.log('Set default audio index to:', defaultArrayIndex);
+                            }
                         }
                         
                         audioSelectSettings.addEventListener('change', async (e) => {
                             const newAudioIndex = parseInt(e.target.value);
-                            if (newAudioIndex === currentAudioIndex || !presignedToken || !userToken) return;
+                            if (newAudioIndex === currentAudioIndex) {
+                                return;
+                            }
+                            
+                            if (hlsInstance && hlsInstance.audioTracks && newAudioIndex >= 0 && newAudioIndex < hlsInstance.audioTracks.length) {
+                                currentAudioIndex = newAudioIndex;
+                                console.log('Switching audio track to index:', newAudioIndex, 'out of', hlsInstance.audioTracks.length);
+                                hlsInstance.audioTrack = newAudioIndex;
+                                console.log('Current active audio track after switch:', hlsInstance.audioTrack);
+                                
+                                setTimeout(() => {
+                                    if (currentVideo && currentVideo.audioTracks) {
+                                        for (let i = 0; i < currentVideo.audioTracks.length; i++) {
+                                            const track = currentVideo.audioTracks[i];
+                                            if (track) {
+                                                if (i === newAudioIndex) {
+                                                    track.enabled = true;
+                                                } else {
+                                                    track.enabled = false;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }, 100);
+                                
+                                showControls();
+                                return;
+                            }
+                            
+                            if (!presignedToken || !userToken) {
+                                console.warn('Cannot switch audio track: missing tokens');
+                                return;
+                            }
                             
                             currentAudioIndex = newAudioIndex;
                             
@@ -735,6 +934,9 @@ pub fn StreamPage() -> impl IntoView {
                                 const data = await response.json();
                                 if (data.success && data.data && data.data.hls_url) {
                                     updateStreamUrl(data.data.hls_url);
+                                } else {
+                                    console.error('Failed to get new stream URL:', data);
+                                    alert('Failed to switch audio track');
                                 }
                             } catch (error) {
                                 console.error('Failed to switch audio track:', error);
@@ -866,8 +1068,12 @@ pub fn StreamPage() -> impl IntoView {
                     }
 
                     if (!streamUrl) {
-                        document.getElementById('player-wrapper').innerHTML = 
-                            '<div class="error">No stream URL provided</div>';
+                        const wrapper = document.getElementById('player-wrapper');
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'error';
+                        errorDiv.textContent = 'No stream URL provided';
+                        wrapper.innerHTML = '';
+                        wrapper.appendChild(errorDiv);
                     } else {
                         const video = document.createElement('video');
                         video.id = 'video-player';
@@ -922,12 +1128,28 @@ pub fn StreamPage() -> impl IntoView {
                         });
 
                         fullscreenBtn.addEventListener('click', () => {
-                            if (!document.fullscreenElement) {
-                                playerContainer.requestFullscreen().catch(err => {
-                                    console.error('Error attempting to enable fullscreen:', err);
-                                });
+                            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+                                if (playerContainer.requestFullscreen) {
+                                    playerContainer.requestFullscreen().catch(err => {
+                                        console.error('Error attempting to enable fullscreen:', err);
+                                    });
+                                } else if (playerContainer.webkitRequestFullscreen) {
+                                    playerContainer.webkitRequestFullscreen();
+                                } else if (playerContainer.mozRequestFullScreen) {
+                                    playerContainer.mozRequestFullScreen();
+                                } else if (playerContainer.msRequestFullscreen) {
+                                    playerContainer.msRequestFullscreen();
+                                }
                             } else {
-                                document.exitFullscreen();
+                                if (document.exitFullscreen) {
+                                    document.exitFullscreen();
+                                } else if (document.webkitExitFullscreen) {
+                                    document.webkitExitFullscreen();
+                                } else if (document.mozCancelFullScreen) {
+                                    document.mozCancelFullScreen();
+                                } else if (document.msExitFullscreen) {
+                                    document.msExitFullscreen();
+                                }
                             }
                             showControls();
                         });
@@ -943,45 +1165,67 @@ pub fn StreamPage() -> impl IntoView {
                             }
                         });
 
-                        document.addEventListener('fullscreenchange', () => {
+                        function handleFullscreenChange() {
                             const fullscreenIcon = document.getElementById('fullscreen-icon');
                             const exitIcon = document.getElementById('fullscreen-exit-icon');
-                            if (document.fullscreenElement) {
+                            const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+                            if (isFullscreen) {
                                 fullscreenIcon.style.display = 'none';
                                 exitIcon.style.display = 'block';
                             } else {
                                 fullscreenIcon.style.display = 'block';
                                 exitIcon.style.display = 'none';
                             }
-                        });
+                        }
+                        
+                        document.addEventListener('fullscreenchange', handleFullscreenChange);
+                        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+                        document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+                        document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 
+                        function getProgressPercent(e) {
+                            const rect = progressContainer.getBoundingClientRect();
+                            const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0) || (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : 0);
+                            return (clientX - rect.left) / rect.width;
+                        }
+                        
                         progressContainer.addEventListener('click', (e) => {
                             if (!currentVideo) return;
-                            const rect = progressContainer.getBoundingClientRect();
-                            const percent = (e.clientX - rect.left) / rect.width;
+                            const percent = getProgressPercent(e);
                             currentVideo.currentTime = percent * currentVideo.duration;
                             showControls();
                         });
+                        
+                        progressContainer.addEventListener('touchstart', (e) => {
+                            e.preventDefault();
+                            if (!currentVideo) return;
+                            isDragging = true;
+                            const percent = getProgressPercent(e);
+                            currentVideo.currentTime = percent * currentVideo.duration;
+                            showControls();
+                        }, { passive: false });
 
                         progressContainer.addEventListener('mousemove', (e) => {
-                            if (!currentVideo) return;
-                            const rect = progressContainer.getBoundingClientRect();
-                            const percent = (e.clientX - rect.left) / rect.width;
+                            if (!currentVideo || isTouchDevice) return;
+                            const percent = getProgressPercent(e);
                             const hoverBar = document.getElementById('progress-hover');
-                            hoverBar.style.width = (percent * 100) + '%';
+                            if (hoverBar) {
+                                hoverBar.style.width = (percent * 100) + '%';
+                            }
                             
                             if (isDragging) {
                                 currentVideo.currentTime = percent * currentVideo.duration;
                             }
                         });
-
-                        progressContainer.addEventListener('mousedown', (e) => {
-                            isDragging = true;
-                            if (!currentVideo) return;
-                            const rect = progressContainer.getBoundingClientRect();
-                            const percent = (e.clientX - rect.left) / rect.width;
+                        
+                        progressContainer.addEventListener('touchmove', (e) => {
+                            e.preventDefault();
+                            if (!currentVideo || !isDragging) return;
+                            const percent = getProgressPercent(e);
                             currentVideo.currentTime = percent * currentVideo.duration;
-                        });
+                            showControls();
+                        }, { passive: false });
+
 
                         let isDraggingVolume = false;
 
@@ -989,56 +1233,174 @@ pub fn StreamPage() -> impl IntoView {
                             isDragging = false;
                             isDraggingVolume = false;
                         });
+                        
+                        document.addEventListener('touchend', () => {
+                            isDragging = false;
+                            isDraggingVolume = false;
+                        });
 
+                        function getVolumePercent(e) {
+                            const rect = volumeSlider.getBoundingClientRect();
+                            const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0) || (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : 0);
+                            return (clientX - rect.left) / rect.width;
+                        }
+                        
                         volumeSlider.addEventListener('click', (e) => {
                             if (!currentVideo) return;
-                            const rect = volumeSlider.getBoundingClientRect();
-                            const percent = (e.clientX - rect.left) / rect.width;
+                            const percent = getVolumePercent(e);
                             currentVideo.volume = Math.max(0, Math.min(1, percent));
                             currentVideo.muted = false;
+                            updateVolumeIcon();
                             showControls();
                         });
+                        
+                        volumeSlider.addEventListener('touchstart', (e) => {
+                            e.preventDefault();
+                            if (!currentVideo) return;
+                            isDraggingVolume = true;
+                            const percent = getVolumePercent(e);
+                            currentVideo.volume = Math.max(0, Math.min(1, percent));
+                            currentVideo.muted = false;
+                            updateVolumeIcon();
+                            showControls();
+                        }, { passive: false });
 
                         volumeSlider.addEventListener('mousedown', (e) => {
                             if (!currentVideo) return;
                             isDraggingVolume = true;
                             e.preventDefault();
-                            const rect = volumeSlider.getBoundingClientRect();
-                            const percent = (e.clientX - rect.left) / rect.width;
+                            const percent = getVolumePercent(e);
                             currentVideo.volume = Math.max(0, Math.min(1, percent));
                             currentVideo.muted = false;
+                            updateVolumeIcon();
                             showControls();
                         });
 
                         document.addEventListener('mousemove', (e) => {
                             if (isDraggingVolume && currentVideo) {
-                                const rect = volumeSlider.getBoundingClientRect();
-                                const percent = (e.clientX - rect.left) / rect.width;
+                                const percent = getVolumePercent(e);
                                 currentVideo.volume = Math.max(0, Math.min(1, percent));
                                 currentVideo.muted = false;
+                                updateVolumeIcon();
                             }
                         });
+                        
+                        document.addEventListener('touchmove', (e) => {
+                            if (isDraggingVolume && currentVideo) {
+                                e.preventDefault();
+                                const percent = getVolumePercent(e);
+                                currentVideo.volume = Math.max(0, Math.min(1, percent));
+                                currentVideo.muted = false;
+                                updateVolumeIcon();
+                                showControls();
+                            }
+                        }, { passive: false });
 
                         video.addEventListener('loadedmetadata', () => {
                             updateProgress();
                             updateVolumeIcon();
+                            
+                            if (video.audioTracks && video.audioTracks.length > 0) {
+                                console.log('Video loadedmetadata - audio tracks:', video.audioTracks.length);
+                                const targetIndex = currentAudioIndex !== null && currentAudioIndex >= 0 && currentAudioIndex < video.audioTracks.length 
+                                    ? currentAudioIndex 
+                                    : 0;
+                                
+                                for (let i = 0; i < video.audioTracks.length; i++) {
+                                    const track = video.audioTracks[i];
+                                    if (track) {
+                                        if (i === targetIndex) {
+                                            track.enabled = true;
+                                        } else {
+                                            track.enabled = false;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        
+                        video.addEventListener('loadeddata', () => {
+                            if (video.audioTracks && video.audioTracks.length > 0) {
+                                const targetIndex = currentAudioIndex !== null && currentAudioIndex >= 0 && currentAudioIndex < video.audioTracks.length 
+                                    ? currentAudioIndex 
+                                    : 0;
+                                
+                                for (let i = 0; i < video.audioTracks.length; i++) {
+                                    const track = video.audioTracks[i];
+                                    if (track && i !== targetIndex) {
+                                        track.enabled = false;
+                                    }
+                                }
+                            }
                         });
 
                         video.addEventListener('timeupdate', updateProgress);
                         video.addEventListener('play', updatePlayPauseIcon);
                         video.addEventListener('pause', updatePlayPauseIcon);
                         video.addEventListener('volumechange', updateVolumeIcon);
-                        video.addEventListener('click', showControls);
+                        video.addEventListener('click', () => {
+                            if (currentVideo.paused) {
+                                currentVideo.play();
+                            } else {
+                                currentVideo.pause();
+                            }
+                            showControls();
+                        });
+                        
+                        video.addEventListener('touchstart', (e) => {
+                            const now = Date.now();
+                            const timeSinceLastTap = now - lastTapTime;
+                            
+                            if (timeSinceLastTap < 300 && timeSinceLastTap > 0) {
+                                e.preventDefault();
+                                clearTimeout(tapTimeout);
+                                if (currentVideo.paused) {
+                                    currentVideo.play();
+                                } else {
+                                    currentVideo.pause();
+                                }
+                                showControls();
+                            } else {
+                                touchStartTime = now;
+                                touchStartX = e.touches[0].clientX;
+                                touchStartY = e.touches[0].clientY;
+                                tapTimeout = setTimeout(() => {
+                                    lastTapTime = now;
+                                }, 300);
+                            }
+                        }, { passive: true });
+                        
+                        video.addEventListener('touchend', (e) => {
+                            const now = Date.now();
+                            const touchDuration = now - touchStartTime;
+                            const touchEndX = e.changedTouches[0].clientX;
+                            const touchEndY = e.changedTouches[0].clientY;
+                            const deltaX = Math.abs(touchEndX - touchStartX);
+                            const deltaY = Math.abs(touchEndY - touchStartY);
+                            
+                            if (touchDuration < 300 && deltaX < 10 && deltaY < 10) {
+                                if (currentVideo.paused) {
+                                    currentVideo.play();
+                                } else {
+                                    currentVideo.pause();
+                                }
+                                showControls();
+                            }
+                        }, { passive: true });
 
                         videoWrapper.addEventListener('mousemove', showControls);
                         videoWrapper.addEventListener('mouseleave', hideControls);
+                        
+                        videoWrapper.addEventListener('touchstart', () => {
+                            showControls();
+                        }, { passive: true });
 
                         const volumeContainer = document.getElementById('volume-container');
                         const volumePercentage = document.getElementById('volume-percentage');
                         let volumeTimeout = null;
 
                         videoWrapper.addEventListener('wheel', (e) => {
-                            if (!currentVideo) return;
+                            if (!currentVideo || isTouchDevice) return;
                             
                             e.preventDefault();
                             
@@ -1047,6 +1409,7 @@ pub fn StreamPage() -> impl IntoView {
                             
                             currentVideo.volume = newVolume;
                             currentVideo.muted = newVolume === 0;
+                            updateVolumeIcon();
                             
                             if (volumeContainer) {
                                 volumeContainer.classList.add('show-slider', 'show-percentage');
@@ -1058,7 +1421,7 @@ pub fn StreamPage() -> impl IntoView {
                             
                             clearTimeout(volumeTimeout);
                             volumeTimeout = setTimeout(() => {
-                                if (volumeContainer) {
+                                if (volumeContainer && !isTouchDevice) {
                                     volumeContainer.classList.remove('show-slider', 'show-percentage');
                                 }
                             }, 1500);
@@ -1070,43 +1433,185 @@ pub fn StreamPage() -> impl IntoView {
                             hlsInstance = new Hls({
                                 enableWorker: true,
                                 lowLatencyMode: false,
+                                startLevel: -1,
+                                capLevelToPlayerSize: true,
                             });
                             hlsInstance.loadSource(streamUrl);
                             hlsInstance.attachMedia(video);
                             
                             hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
                                 console.log('HLS manifest parsed, starting playback');
+                                console.log('Available audio tracks:', hlsInstance.audioTracks ? hlsInstance.audioTracks.length : 0);
+                                
+                                if (hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
+                                    console.log('HLS audio tracks:', hlsInstance.audioTracks.map((t, i) => `${i}: ${t.name || t.lang || t.language || 'unknown'}`).join(', '));
+                                    
+                                    let targetAudioIndex = currentAudioIndex;
+                                    
+                                    if (targetAudioIndex === null || targetAudioIndex < 0 || targetAudioIndex >= hlsInstance.audioTracks.length) {
+                                        targetAudioIndex = -1;
+                                        
+                                        if (metadata && metadata.audios && metadata.audios.length > 0) {
+                                            let englishIndex = -1;
+                                            
+                                            for (let i = 0; i < metadata.audios.length; i++) {
+                                                const audio = metadata.audios[i];
+                                                if (audio.language === 'eng' || audio.language === 'en' || (audio.language_full && audio.language_full.toLowerCase().includes('english'))) {
+                                                    englishIndex = i;
+                                                    break;
+                                                }
+                                            }
+                                            
+                                            if (englishIndex >= 0 && englishIndex < hlsInstance.audioTracks.length) {
+                                                targetAudioIndex = englishIndex;
+                                                console.log('Defaulting to English audio track at array index:', englishIndex);
+                                            }
+                                        }
+                                        
+                                        if (targetAudioIndex === -1) {
+                                            targetAudioIndex = 0;
+                                            console.log('No default found, using first track');
+                                        }
+                                        
+                                        currentAudioIndex = targetAudioIndex;
+                                        
+                                        const audioSelect = document.getElementById('audio-track-settings');
+                                        if (audioSelect && audioSelect.options[targetAudioIndex]) {
+                                            audioSelect.selectedIndex = targetAudioIndex;
+                                        }
+                                    }
+                                    
+                                    if (targetAudioIndex >= 0 && targetAudioIndex < hlsInstance.audioTracks.length) {
+                                        console.log('Setting HLS audio track to index:', targetAudioIndex, 'out of', hlsInstance.audioTracks.length);
+                                        hlsInstance.audioTrack = targetAudioIndex;
+                                        console.log('Current active audio track after setting:', hlsInstance.audioTrack);
+                                        
+                                        const disableOtherTracks = () => {
+                                            if (currentVideo && currentVideo.audioTracks) {
+                                                console.log('Video element audio tracks:', currentVideo.audioTracks.length);
+                                                let enabledCount = 0;
+                                                for (let i = 0; i < currentVideo.audioTracks.length; i++) {
+                                                    const track = currentVideo.audioTracks[i];
+                                                    if (track) {
+                                                        if (i === targetAudioIndex) {
+                                                            track.enabled = true;
+                                                            enabledCount++;
+                                                            console.log(`Enabled video audio track ${i}: ${track.label || track.language || 'unknown'}`);
+                                                        } else {
+                                                            track.enabled = false;
+                                                            console.log(`Disabled video audio track ${i}: ${track.label || track.language || 'unknown'}`);
+                                                        }
+                                                    }
+                                                }
+                                                console.log('Total enabled audio tracks:', enabledCount);
+                                            }
+                                        };
+                                        
+                                        setTimeout(disableOtherTracks, 100);
+                                        setTimeout(disableOtherTracks, 500);
+                                        setTimeout(disableOtherTracks, 1000);
+                                    }
+                                } else {
+                                    console.warn('HLS.js reports 0 audio tracks - stream may be pre-transcoded with specific audio track');
+                                    if (currentVideo && currentVideo.audioTracks && currentVideo.audioTracks.length > 0) {
+                                        console.log('Video element has', currentVideo.audioTracks.length, 'audio tracks');
+                                        const targetIndex = currentAudioIndex !== null && currentAudioIndex >= 0 && currentAudioIndex < currentVideo.audioTracks.length 
+                                            ? currentAudioIndex 
+                                            : 0;
+                                        
+                                        for (let i = 0; i < currentVideo.audioTracks.length; i++) {
+                                            const track = currentVideo.audioTracks[i];
+                                            if (track) {
+                                                if (i === targetIndex) {
+                                                    track.enabled = true;
+                                                    console.log(`Enabled video audio track ${i}`);
+                                                } else {
+                                                    track.enabled = false;
+                                                    console.log(`Disabled video audio track ${i}`);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
                                 enableSubtitlesFromStream();
+                            });
+                            
+                            hlsInstance.on(Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
+                                console.log('Audio track switched to:', data.id, 'name:', data.name);
+                                currentAudioIndex = data.id;
+                                
+                                setTimeout(() => {
+                                    if (currentVideo && currentVideo.audioTracks) {
+                                        for (let i = 0; i < currentVideo.audioTracks.length; i++) {
+                                            const track = currentVideo.audioTracks[i];
+                                            if (track) {
+                                                if (i === data.id) {
+                                                    track.enabled = true;
+                                                    console.log('Enabled video audio track:', i, track.label || track.language || 'unknown');
+                                                } else {
+                                                    track.enabled = false;
+                                                    console.log('Disabled video audio track:', i, track.label || track.language || 'unknown');
+                                                }
+                                            }
+                                        }
+                                    }
+                                }, 100);
                             });
                             
                             hlsInstance.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
                                 enableSubtitlesFromStream();
                             });
                             
+                            hlsInstance.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+                                console.log('Audio tracks updated, count:', hlsInstance.audioTracks ? hlsInstance.audioTracks.length : 0);
+                                if (hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
+                                    let targetIndex = currentAudioIndex;
+                                    if (targetIndex === null || targetIndex < 0 || targetIndex >= hlsInstance.audioTracks.length) {
+                                        targetIndex = 0;
+                                        currentAudioIndex = 0;
+                                    }
+                                    console.log('Setting audio track on AUDIO_TRACKS_UPDATED to:', targetIndex);
+                                    hlsInstance.audioTrack = targetIndex;
+                                }
+                            });
+                            
                             hlsInstance.on(Hls.Events.ERROR, (event, data) => {
                                 console.error('HLS error:', data);
                                 if (data.fatal) {
+                                    const errorDiv = document.createElement('div');
+                                    errorDiv.className = 'error';
                                     switch (data.type) {
                                         case Hls.ErrorTypes.NETWORK_ERROR:
-                                            wrapper.innerHTML = '<div class="error">Network error. Please check your connection and try again.</div>';
+                                            errorDiv.textContent = 'Network error. Please check your connection and try again.';
                                             break;
                                         case Hls.ErrorTypes.MEDIA_ERROR:
-                                            wrapper.innerHTML = '<div class="error">Media error. The stream may be unavailable.</div>';
+                                            errorDiv.textContent = 'Media error. The stream may be unavailable.';
                                             break;
                                         default:
-                                            wrapper.innerHTML = '<div class="error">Stream error. Please try again later.</div>';
+                                            errorDiv.textContent = 'Stream error. Please try again later.';
                                             break;
                                     }
+                                    wrapper.innerHTML = '';
+                                    wrapper.appendChild(errorDiv);
                                 }
                             });
                         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                             video.src = streamUrl;
                             video.addEventListener('error', (e) => {
                                 console.error('Video error:', e);
-                                wrapper.innerHTML = '<div class="error">Error loading stream. Please check the URL.</div>';
+                                const errorDiv = document.createElement('div');
+                                errorDiv.className = 'error';
+                                errorDiv.textContent = 'Error loading stream. Please check the URL.';
+                                wrapper.innerHTML = '';
+                                wrapper.appendChild(errorDiv);
                             });
                         } else {
-                            wrapper.innerHTML = '<div class="error">Your browser does not support HLS streaming. Please use a modern browser.</div>';
+                            const errorDiv = document.createElement('div');
+                            errorDiv.className = 'error';
+                            errorDiv.textContent = 'Your browser does not support HLS streaming. Please use a modern browser.';
+                            wrapper.innerHTML = '';
+                            wrapper.appendChild(errorDiv);
                         }
                     }
 
@@ -1127,10 +1632,27 @@ pub fn StreamPage() -> impl IntoView {
                             case 'f':
                             case 'F':
                                 e.preventDefault();
-                                if (!document.fullscreenElement) {
-                                    document.getElementById('player-container').requestFullscreen();
+                                const container = document.getElementById('player-container');
+                                if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+                                    if (container.requestFullscreen) {
+                                        container.requestFullscreen();
+                                    } else if (container.webkitRequestFullscreen) {
+                                        container.webkitRequestFullscreen();
+                                    } else if (container.mozRequestFullScreen) {
+                                        container.mozRequestFullScreen();
+                                    } else if (container.msRequestFullscreen) {
+                                        container.msRequestFullscreen();
+                                    }
                                 } else {
-                                    document.exitFullscreen();
+                                    if (document.exitFullscreen) {
+                                        document.exitFullscreen();
+                                    } else if (document.webkitExitFullscreen) {
+                                        document.webkitExitFullscreen();
+                                    } else if (document.mozCancelFullScreen) {
+                                        document.mozCancelFullScreen();
+                                    } else if (document.msExitFullscreen) {
+                                        document.msExitFullscreen();
+                                    }
                                 }
                                 showControls();
                                 break;
@@ -1162,8 +1684,16 @@ pub fn StreamPage() -> impl IntoView {
                                 showControls();
                                 break;
                             case 'Escape':
-                                if (document.fullscreenElement) {
-                                    document.exitFullscreen();
+                                if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+                                    if (document.exitFullscreen) {
+                                        document.exitFullscreen();
+                                    } else if (document.webkitExitFullscreen) {
+                                        document.webkitExitFullscreen();
+                                    } else if (document.mozCancelFullScreen) {
+                                        document.mozCancelFullScreen();
+                                    } else if (document.msExitFullscreen) {
+                                        document.msExitFullscreen();
+                                    }
                                 }
                                 break;
                         }

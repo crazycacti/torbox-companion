@@ -103,9 +103,6 @@ impl TorboxClient {
     where
         T: Serialize,
     {
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&format!("[TorboxClient] {} {}", method, url).into());
-        
         let mut request = self.client.request(method, &url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
@@ -115,9 +112,7 @@ impl TorboxClient {
             request = request.json(body_data);
         }
 
-        request.send().await.map_err(|e| {
-            #[cfg(target_arch = "wasm32")]
-            web_sys::console::log_1(&format!("[TorboxClient] Request failed: {:?}, URL: {}", e, url).into());
+        request.send().await.map_err(|_| {
             ApiError::NetworkError
         })
     }
@@ -131,8 +126,6 @@ impl TorboxClient {
         
         if status.is_success() {
             let text = response.text().await.map_err(|e| {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("Failed to get response text: {:?}", e).into());
                 ApiError::HttpError { 
                     status_code, 
                     message: format!("Failed to read response: {}", e) 
@@ -140,10 +133,6 @@ impl TorboxClient {
             })?;
             
             let api_response: ApiResponse<T> = serde_json::from_str(&text).map_err(|e| {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("JSON parse error: {:?}", e).into());
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("Response text: {}", &text[..text.len().min(500)]).into());
                 ApiError::HttpError { 
                     status_code, 
                     message: format!("JSON parse error: {}", e) 
@@ -195,8 +184,6 @@ impl TorboxClient {
         
         if status.is_success() {
             let text = response.text().await.map_err(|e| {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("Failed to get response text: {:?}", e).into());
                 ApiError::HttpError { 
                     status_code, 
                     message: format!("Failed to read response: {}", e) 
@@ -204,10 +191,6 @@ impl TorboxClient {
             })?;
             
             let search_response: SearchApiResponse<T> = serde_json::from_str(&text).map_err(|e| {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("JSON parse error: {:?}", e).into());
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("Response text: {}", &text[..text.len().min(500)]).into());
                 ApiError::HttpError { 
                     status_code, 
                     message: format!("JSON parse error: {}", e) 
@@ -344,8 +327,6 @@ impl TorboxClient {
                 form_data.append_with_str("add_only_if_cached", &add_only_if_cached.to_string()).map_err(|_| ApiError::NetworkError)?;
             }
             
-            web_sys::console::log_1(&format!("[TorboxClient] POST {}", url).into());
-            
             let window = window().ok_or(ApiError::NetworkError)?;
             let mut init = web_sys::RequestInit::new();
             init.set_method("POST");
@@ -367,11 +348,8 @@ impl TorboxClient {
                 .map_err(|_| ApiError::NetworkError)?;
             let text = text.as_string().ok_or(ApiError::NetworkError)?;
             
-            // Parse response JSON
             let status = resp.status();
             let api_response: ApiResponse<serde_json::Value> = serde_json::from_str(&text).map_err(|e| {
-                web_sys::console::log_1(&format!("JSON parse error: {:?}", e).into());
-                web_sys::console::log_1(&format!("Response text: {}", &text[..text.len().min(500)]).into());
                 ApiError::HttpError { 
                     status_code: status, 
                     message: format!("JSON parse error: {}", e) 
@@ -389,7 +367,6 @@ impl TorboxClient {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // In server context, use reqwest multipart
             use reqwest::multipart;
             
             let mut form = multipart::Form::new();
@@ -602,8 +579,6 @@ impl TorboxClient {
                 form_data.append_with_str("add_only_if_cached", &add_only_if_cached.to_string()).map_err(|_| ApiError::NetworkError)?;
             }
             
-            web_sys::console::log_1(&format!("[TorboxClient] POST {}", url).into());
-            
             let window = window().ok_or(ApiError::NetworkError)?;
             let mut init = web_sys::RequestInit::new();
             init.set_method("POST");
@@ -625,11 +600,8 @@ impl TorboxClient {
                 .map_err(|_| ApiError::NetworkError)?;
             let text = text.as_string().ok_or(ApiError::NetworkError)?;
             
-            // Parse response JSON
             let status = resp.status();
             let api_response: ApiResponse<serde_json::Value> = serde_json::from_str(&text).map_err(|e| {
-                web_sys::console::log_1(&format!("JSON parse error: {:?}", e).into());
-                web_sys::console::log_1(&format!("Response text: {}", &text[..text.len().min(500)]).into());
                 ApiError::HttpError { 
                     status_code: status, 
                     message: format!("JSON parse error: {}", e) 
@@ -647,7 +619,6 @@ impl TorboxClient {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // In server context, use reqwest multipart
             use reqwest::multipart;
             
             let mut form = multipart::Form::new();

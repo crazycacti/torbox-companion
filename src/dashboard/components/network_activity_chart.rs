@@ -183,8 +183,8 @@ pub fn NetworkActivityChart() -> impl IntoView {
         <div class="mt-4 mb-4 rounded-xl border" 
              style="border-color: var(--border-secondary); background-color: var(--bg-card); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);">
             <div class="px-4 py-4">
-                <div class="flex items-center justify-between gap-4 cursor-pointer" on:click=toggle_collapse>
-                    <div class="flex items-center gap-4 flex-1">
+                <div class="flex items-center justify-between gap-4 cursor-pointer" on:click=toggle_collapse style="user-select: none;">
+                    <div class="flex items-center gap-4 flex-1" style="pointer-events: none;">
                         <h3 class="text-base lg:text-lg font-semibold" style="color: var(--text-primary);">
                             "Network Activity"
                         </h3>
@@ -204,7 +204,7 @@ pub fn NetworkActivityChart() -> impl IntoView {
                             </div>
                         </div>
                     </div>
-                    <div class="text-lg" style="color: var(--text-secondary);">
+                    <div class="text-lg" style="color: var(--text-secondary); pointer-events: none;">
                         {move || if is_collapsed.get() { "▼" } else { "▲" }}
                     </div>
                 </div>
@@ -293,7 +293,7 @@ pub fn NetworkActivityChart() -> impl IntoView {
                         }
                     ></canvas>
                     {move || {
-                        hovered_point.get().map(|(x, y, dl, ul)| {
+                        hovered_point.get_untracked().map(|(x, y, dl, ul)| {
                             view! {
                                 <div 
                                     class="absolute pointer-events-none rounded px-2 py-1 text-xs"
@@ -379,7 +379,7 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
     use wasm_bindgen::JsCast;
     use web_sys::CanvasRenderingContext2d;
     
-    if let Some(canvas) = canvas_ref.get() {
+    if let Some(canvas) = canvas_ref.get_untracked() {
         if let Ok(Some(ctx)) = canvas.get_context("2d") {
             if let Some(ctx) = ctx.dyn_ref::<CanvasRenderingContext2d>() {
                 let rect = canvas.get_bounding_client_rect();
@@ -638,7 +638,7 @@ fn draw_chart(canvas_ref: &NodeRef<leptos::html::Canvas>, data_points: &VecDeque
                     
                     ctx.set_line_width(1.0);
                     
-                    let hovered = hovered_point.get();
+                    let hovered = hovered_point.get_untracked();
                     let hovered_x = hovered.map(|(x, _, _, _)| x);
                     
                     ctx.set_fill_style_str(download_color);
@@ -698,7 +698,7 @@ fn find_hovered_point(
 ) {
     use wasm_bindgen::JsCast;
     
-    if let Some(canvas) = canvas_ref.get() {
+    if let Some(canvas) = canvas_ref.get_untracked() {
         let rect = canvas.get_bounding_client_rect();
         let width = rect.width();
         let height = rect.height();

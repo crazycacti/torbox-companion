@@ -38,7 +38,17 @@ where
                 .map(Some)
                 .ok_or_else(|| D::Error::custom("Invalid integer"))
         }
-        _ => Ok(None), // If it's not a number, return None instead of erroring
+        serde_json::Value::Array(arr) => {
+            if let Some(first) = arr.first() {
+                if let Some(n) = first.as_i64() {
+                    if let Ok(season_num) = i32::try_from(n) {
+                        return Ok(Some(season_num));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -311,6 +321,7 @@ pub struct CreateRssFeedRequest {
 pub struct Stream {
     #[serde(default, alias = "token")]
     pub user_token: Option<String>,
+    #[serde(alias = "file_token")]
     pub presigned_token: String,
     #[serde(alias = "hls_url")]
     pub stream_url: String,

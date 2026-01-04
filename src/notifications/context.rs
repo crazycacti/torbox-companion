@@ -19,7 +19,7 @@ impl NotificationContext {
 
     pub fn add(&self, notification: Notification) {
         let mut notif = notification;
-        let id = self.next_id.get();
+        let id = self.next_id.get_untracked();
         notif.id = id;
         
         self.notifications.update(|notifications| {

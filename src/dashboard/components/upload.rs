@@ -355,11 +355,11 @@ pub fn UploadComponent() -> impl IntoView {
         <div class="w-full mb-4 sm:mb-6" style="position: relative; z-index: 5;">
             <div class="rounded-xl border" style="background-color: var(--bg-card); border-color: var(--border-secondary); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);">
                 <div class="px-4 py-4">
-                    <div class="flex items-center justify-between gap-4 cursor-pointer" on:click=toggle_collapse>
-                        <h3 class="text-base lg:text-lg font-semibold" style="color: var(--text-primary);">
+                    <div class="flex items-center justify-between gap-4 cursor-pointer" on:click=toggle_collapse style="user-select: none;">
+                        <h3 class="text-base lg:text-lg font-semibold" style="color: var(--text-primary); pointer-events: none;">
                             "Upload"
                         </h3>
-                        <div class="text-lg transition-transform" style={move || if is_collapsed.get() { "transform: rotate(0deg); color: var(--text-secondary);" } else { "transform: rotate(180deg); color: var(--text-secondary);" }}>
+                        <div class="text-lg transition-transform" style={move || if is_collapsed.get() { "transform: rotate(0deg); color: var(--text-secondary); pointer-events: none;" } else { "transform: rotate(180deg); color: var(--text-secondary); pointer-events: none;" }}>
                             "▼"
                         </div>
                     </div>

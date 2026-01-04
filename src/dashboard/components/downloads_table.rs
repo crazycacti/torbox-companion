@@ -897,7 +897,7 @@ pub fn DownloadsTable(
         spawn_local(async move {
             let loaded_state = SelectionState::load_from_storage();
             let mut state = loaded_state;
-            let current_downloads = downloads_clone.get();
+            let current_downloads = downloads_clone.get_untracked();
             let valid_ids: HashSet<i32> = current_downloads.iter().map(|d| d.id).collect();
             state.selected_items.retain(|id| valid_ids.contains(id));
             state.selected_files.retain(|item_id, _| valid_ids.contains(item_id));
@@ -956,7 +956,7 @@ pub fn DownloadsTable(
         move || {
             #[cfg(target_arch = "wasm32")]
             {
-                if user_data.get().is_none() && !user_loading.get() {
+                if user_data.get_untracked().is_none() && !user_loading.get_untracked() {
                     user_loading.set(true);
                     spawn_local(async move {
                         if let Some(window) = web_sys::window() {
@@ -1021,17 +1021,18 @@ pub fn DownloadsTable(
                 use web_sys::js_sys::Promise;
                 
                 async fn yield_to_browser() {
-                    let window = web_sys::window().unwrap();
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    let closure = wasm_bindgen::closure::Closure::once(move || {
-                        let _ = tx.send(());
-                    });
-                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                        closure.as_ref().unchecked_ref(),
-                        0
-                    );
-                    closure.forget();
-                    let _ = rx.await;
+                    if let Some(window) = web_sys::window() {
+                        let (tx, rx) = futures::channel::oneshot::channel();
+                        let closure = wasm_bindgen::closure::Closure::once(move || {
+                            let _ = tx.send(());
+                        });
+                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                            closure.as_ref().unchecked_ref(),
+                            0
+                        );
+                        closure.forget();
+                        let _ = rx.await;
+                    }
                 }
                 
                 async fn yield_microtask() {
@@ -1043,8 +1044,6 @@ pub fn DownloadsTable(
                 
                 #[cfg(target_arch = "wasm32")]
                 let load_start_time = js_sys::Date::now();
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&"[DownloadsTable] Starting to fetch and load all mylist items".into());
                 #[cfg(not(target_arch = "wasm32"))]
                 let load_start_time = 0.0;
                 
@@ -1263,15 +1262,8 @@ pub fn DownloadsTable(
                                 #[cfg(target_arch = "wasm32")]
                                 {
                                     let load_end_time = js_sys::Date::now();
-                                    let load_duration_ms = load_end_time - load_start_time;
+                                    let _load_duration_ms = load_end_time - load_start_time;
                                     let item_count = all_downloads.len();
-                                    web_sys::console::log_1(
-                                        &format!(
-                                            "[DownloadsTable] Finished loading all mylist items: {} items in {:.2}s",
-                                            item_count,
-                                            load_duration_ms / 1000.0
-                                        ).into()
-                                    );
                                     
                                     let render_start_time = js_sys::Date::now();
                                     
@@ -1282,17 +1274,9 @@ pub fn DownloadsTable(
                                     yield_microtask().await;
                                     
                                     let render_end_time = js_sys::Date::now();
-                                    let render_duration_ms = render_end_time - render_start_time;
-                                    let total_duration_ms = render_end_time - load_start_time;
-                                    
-                                    web_sys::console::log_1(
-                                        &format!(
-                                            "[DownloadsTable] Table fully rendered: {} items rendered in {:.2}s (total: {:.2}s)",
-                                            item_count,
-                                            render_duration_ms / 1000.0,
-                                            total_duration_ms / 1000.0
-                                        ).into()
-                                    );
+                                    let _render_duration_ms = render_end_time - render_start_time;
+                                    let _total_duration_ms = render_end_time - load_start_time;
+                                    let _item_count = item_count;
                                 }
                                 #[cfg(not(target_arch = "wasm32"))]
                                 {
@@ -1357,15 +1341,16 @@ pub fn DownloadsTable(
             use web_sys::js_sys::Promise;
             
             let promise = Promise::new(&mut |resolve, _| {
-                let window = web_sys::window().unwrap();
-                let closure = wasm_bindgen::closure::Closure::once(move || {
-                    resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
-                });
-                let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                    closure.as_ref().unchecked_ref(),
-                    10000,
-                );
-                closure.forget();
+                if let Some(window) = web_sys::window() {
+                    let closure = wasm_bindgen::closure::Closure::once(move || {
+                        resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                    });
+                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                        closure.as_ref().unchecked_ref(),
+                        10000,
+                    );
+                    closure.forget();
+                }
             });
             let _ = JsFuture::from(promise).await;
             
@@ -1549,15 +1534,16 @@ pub fn DownloadsTable(
                 let poll_interval = 10000;
                 
                 let promise = Promise::new(&mut |resolve, _| {
-                    let window = web_sys::window().unwrap();
-                    let closure = wasm_bindgen::closure::Closure::once(move || {
-                        resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
-                    });
-                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                        closure.as_ref().unchecked_ref(),
-                        poll_interval,
-                    );
-                    closure.forget();
+                    if let Some(window) = web_sys::window() {
+                        let closure = wasm_bindgen::closure::Closure::once(move || {
+                            resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                        });
+                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                            closure.as_ref().unchecked_ref(),
+                            poll_interval,
+                        );
+                        closure.forget();
+                    }
                 });
                 let _ = JsFuture::from(promise).await;
             }
@@ -1604,8 +1590,8 @@ pub fn DownloadsTable(
                         let _ = JsFuture::from(promise).await;
                     }
                     
-                    let current_downloads = downloads_clone.get();
-                    let mut expanded = expanded_file_rows_clone.get();
+                    let current_downloads = downloads_clone.get_untracked();
+                    let mut expanded = expanded_file_rows_clone.get_untracked();
                     let downloads_with_files: Vec<i32> = current_downloads.iter()
                         .filter(|d| !d.files.is_empty())
                         .map(|d| d.id)
@@ -1862,7 +1848,7 @@ pub fn DownloadsTable(
                                     };
                                     
                                     let file_ids_to_download: Vec<i32> = if file_id.is_none() {
-                                        let downloads_list = downloads_ref.get();
+                                        let downloads_list = downloads_ref.get_untracked();
                                         if let Some(download) = downloads_list.iter().find(|d| d.id == id) {
                                             let media_files = get_media_files(&download.files);
                                             if !media_files.is_empty() {
@@ -2283,15 +2269,16 @@ pub fn DownloadsTable(
                                                         }
                                                         
                                                         let promise = web_sys::js_sys::Promise::new(&mut |resolve, _| {
-                                                            let window = web_sys::window().unwrap();
-                                                            let closure = wasm_bindgen::closure::Closure::once(move || {
-                                                                resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
-                                                            });
-                                                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                                                closure.as_ref().unchecked_ref(),
-                                                                1000,
-                                                            );
-                                                            closure.forget();
+                                                            if let Some(window) = web_sys::window() {
+                                                                let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                                    resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                                                                });
+                                                                let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                                    closure.as_ref().unchecked_ref(),
+                                                                    1000,
+                                                                );
+                                                                closure.forget();
+                                                            }
                                                         });
                                                         let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
                                                     }
@@ -2923,7 +2910,7 @@ pub fn DownloadsTable(
                                     let final_file_id = if let Some(fid) = file_id {
                                         Some(fid)
                                     } else {
-                                        let downloads_list = downloads_ref.get();
+                                        let downloads_list = downloads_ref.get_untracked();
                                         if let Some(download) = downloads_list.iter().find(|d| d.id == id) {
                                             get_largest_video_file(&download.files).map(|f| f.id)
                                         } else {
@@ -2945,7 +2932,7 @@ pub fn DownloadsTable(
                                         file_id: final_file_id,
                                         r#type: Some(stream_type.to_string()),
                                         chosen_subtitle_index: None,
-                                        chosen_audio_index: Some(0),
+                                        chosen_audio_index: None,
                                     };
                                 
                                     let result = client.create_stream(request).await;
@@ -2957,6 +2944,137 @@ pub fn DownloadsTable(
                                     match result {
                                         Ok(response) => {
                                             if let Some(stream_data) = response.data {
+                                                let mut english_audio_index: Option<i32> = None;
+                                                
+                                                if let Some(metadata) = &stream_data.metadata {
+                                                    if let Some(metadata_obj) = metadata.as_object() {
+                                                        if let Some(audios) = metadata_obj.get("audios").and_then(|a| a.as_array()) {
+                                                            for (idx, audio) in audios.iter().enumerate() {
+                                                                if let Some(audio_obj) = audio.as_object() {
+                                                                    let language = audio_obj.get("language")
+                                                                        .and_then(|l| l.as_str())
+                                                                        .unwrap_or("");
+                                                                    let language_full = audio_obj.get("language_full")
+                                                                        .and_then(|l| l.as_str())
+                                                                        .unwrap_or("");
+                                                                    
+                                                                    if language == "eng" || language == "en" || 
+                                                                       language_full.to_lowercase().contains("english") {
+                                                                        english_audio_index = Some(idx as i32);
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                if let Some(eng_idx) = english_audio_index {
+                                                    if stream_data.audio_index != Some(eng_idx) {
+                                                        let id_clone = id;
+                                                        let notifications_local_clone = notifications_local.clone();
+                                                        let final_file_id_clone = final_file_id;
+                                                        let stream_type_clone = stream_type.to_string();
+                                                        let stream_data_fallback = stream_data.clone();
+                                                        
+                                                        spawn_local(async move {
+                                                            if let Some(window) = web_sys::window() {
+                                                                if let Ok(Some(storage)) = window.local_storage() {
+                                                                    if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                                                        if !api_key.is_empty() {
+                                                                            let client = TorboxClient::new(api_key);
+                                                                            let retry_request = crate::api::types::CreateStreamRequest {
+                                                                                id: id_clone,
+                                                                                file_id: final_file_id_clone,
+                                                                                r#type: Some(stream_type_clone.clone()),
+                                                                                chosen_subtitle_index: None,
+                                                                                chosen_audio_index: Some(eng_idx),
+                                                                            };
+                                                                            
+                                                                            match client.create_stream(retry_request).await {
+                                                                                Ok(retry_response) => {
+                                                                                    if let Some(new_stream_data) = retry_response.data {
+                                                                                        if let Some(window) = web_sys::window() {
+                                                                                            let encoded_url = js_sys::encode_uri_component(&new_stream_data.stream_url);
+                                                                                            let mut player_url = format!("/stream?url={}", encoded_url.as_string().unwrap_or_default());
+                                                                                            
+                                                                                            let encoded_token = js_sys::encode_uri_component(&new_stream_data.presigned_token);
+                                                                                            player_url.push_str(&format!("&presigned_token={}", encoded_token.as_string().unwrap_or_default()));
+                                                                                            if let Some(user_token) = &new_stream_data.user_token {
+                                                                                                let encoded_user_token = js_sys::encode_uri_component(user_token);
+                                                                                                player_url.push_str(&format!("&user_token={}", encoded_user_token.as_string().unwrap_or_default()));
+                                                                                            }
+                                                                                            if let Some(metadata) = &new_stream_data.metadata {
+                                                                                                if let Ok(metadata_json) = serde_json::to_string(metadata) {
+                                                                                                    let encoded_metadata = js_sys::encode_uri_component(&metadata_json);
+                                                                                                    player_url.push_str(&format!("&metadata={}", encoded_metadata.as_string().unwrap_or_default()));
+                                                                                                }
+                                                                                            }
+                                                                                            if let Some(subtitles) = &new_stream_data.subtitles {
+                                                                                                if !subtitles.is_empty() {
+                                                                                                    if let Ok(subtitles_json) = serde_json::to_string(subtitles) {
+                                                                                                        let encoded_subtitles = js_sys::encode_uri_component(&subtitles_json);
+                                                                                                        player_url.push_str(&format!("&subtitle_urls={}", encoded_subtitles.as_string().unwrap_or_default()));
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                            
+                                                                                            if let Ok(_) = window.open_with_url_and_target(&player_url, "_blank") {
+                                                                                                log!("Stream opened with English audio for ID: {}", id_clone);
+                                                                                                notifications_local_clone.success("Stream opened successfully".to_string());
+                                                                                            } else {
+                                                                                                log!("Failed to open stream window for ID: {}", id_clone);
+                                                                                                notifications_local_clone.error("Failed to open stream window. Please check if pop-ups are blocked.".to_string());
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    log!("Failed to create stream with English audio: {:?}", e);
+                                                                                    notifications_local_clone.warning("Using default audio track".to_string());
+                                                                                    if let Some(window) = web_sys::window() {
+                                                                                        let encoded_url = js_sys::encode_uri_component(&stream_data_fallback.stream_url);
+                                                                                        let mut player_url = format!("/stream?url={}", encoded_url.as_string().unwrap_or_default());
+                                                                                        
+                                                                                        let encoded_token = js_sys::encode_uri_component(&stream_data_fallback.presigned_token);
+                                                                                        player_url.push_str(&format!("&presigned_token={}", encoded_token.as_string().unwrap_or_default()));
+                                                                                        if let Some(user_token) = &stream_data_fallback.user_token {
+                                                                                            let encoded_user_token = js_sys::encode_uri_component(user_token);
+                                                                                            player_url.push_str(&format!("&user_token={}", encoded_user_token.as_string().unwrap_or_default()));
+                                                                                        }
+                                                                                        if let Some(metadata) = &stream_data_fallback.metadata {
+                                                                                            if let Ok(metadata_json) = serde_json::to_string(metadata) {
+                                                                                                let encoded_metadata = js_sys::encode_uri_component(&metadata_json);
+                                                                                                player_url.push_str(&format!("&metadata={}", encoded_metadata.as_string().unwrap_or_default()));
+                                                                                            }
+                                                                                        }
+                                                                                        if let Some(subtitles) = &stream_data_fallback.subtitles {
+                                                                                            if !subtitles.is_empty() {
+                                                                                                if let Ok(subtitles_json) = serde_json::to_string(subtitles) {
+                                                                                                    let encoded_subtitles = js_sys::encode_uri_component(&subtitles_json);
+                                                                                                    player_url.push_str(&format!("&subtitle_urls={}", encoded_subtitles.as_string().unwrap_or_default()));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                        
+                                                                                        if let Ok(_) = window.open_with_url_and_target(&player_url, "_blank") {
+                                                                                            log!("Stream opened with default audio for ID: {}", id_clone);
+                                                                                        } else {
+                                                                                            log!("Failed to open stream window for ID: {}", id_clone);
+                                                                                            notifications_local_clone.error("Failed to open stream window. Please check if pop-ups are blocked.".to_string());
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        });
+                                                        return;
+                                                    }
+                                                }
+                                                
                                                 notifications_local.success("Stream opened successfully".to_string());
                                                 log!("Stream created for ID: {}", id);
                                                 if let Some(window) = web_sys::window() {
@@ -2969,6 +3087,7 @@ pub fn DownloadsTable(
                                                         let encoded_user_token = js_sys::encode_uri_component(user_token);
                                                         player_url.push_str(&format!("&user_token={}", encoded_user_token.as_string().unwrap_or_default()));
                                                     }
+                                                    
                                                     if let Some(metadata) = &stream_data.metadata {
                                                         if let Ok(metadata_json) = serde_json::to_string(metadata) {
                                                             let encoded_metadata = js_sys::encode_uri_component(&metadata_json);
@@ -2986,6 +3105,9 @@ pub fn DownloadsTable(
                                                     
                                                     if let Ok(_) = window.open_with_url_and_target(&player_url, "_blank") {
                                                         log!("Stream opened for ID: {}", id);
+                                                    } else {
+                                                        log!("Failed to open stream window for ID: {}", id);
+                                                        notifications_local.error("Failed to open stream window. Please check if pop-ups are blocked.".to_string());
                                                     }
                                                 }
                                             }
@@ -4319,16 +4441,17 @@ pub fn DownloadsTable(
                                                                                                                                 }
                                                                                                                                 
                                                                                                                                 let promise = web_sys::js_sys::Promise::new(&mut |resolve, _| {
-                                                                                                                                    let window = web_sys::window().unwrap();
-                                                                                                                                    let closure = wasm_bindgen::closure::Closure::once(move || {
-                                                                                                                                        resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                                                                                                                                    if let Some(window) = web_sys::window() {
+                                                                                                                                        let closure = wasm_bindgen::closure::Closure::once(move || {
+                                                                                                                                            resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                                                                                                                                        });
+                                                                                                                                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                                                                                                                                closure.as_ref().unchecked_ref(),
+                                                                                                                                                1000,
+                                                                                                                                            );
+                                                                                                                                            closure.forget();
+                                                                                                                                        }
                                                                                                                                     });
-                                                                                                                                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                                                                                                                        closure.as_ref().unchecked_ref(),
-                                                                                                                                        1000,
-                                                                                                                                    );
-                                                                                                                                    closure.forget();
-                                                                                                                                });
                                                                                                                                 let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
                                                                                                                             }
                                                                                                                         }

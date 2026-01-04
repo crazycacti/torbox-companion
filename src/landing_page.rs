@@ -40,16 +40,28 @@ pub fn LandingPage() -> impl IntoView {
     let is_connecting_clone = is_connecting.clone();
     let error_message_clone = error_message.clone();
     let connect_to_api = move |_| {
-        let key = api_key.get();
+        let key = api_key.get().trim().to_string();
         let notifications_for_check = notifications_clone.clone();
         let error_message_for_check = error_message_clone.clone();
+        
         if key.is_empty() {
             error_message_for_check.set("Invalid Key".to_string());
             notifications_for_check.error("Please enter your API key".to_string());
             return;
         }
+        
+        if key.len() < 10 || key.len() > 500 {
+            error_message_for_check.set("Invalid Key".to_string());
+            notifications_for_check.error("API key length is invalid".to_string());
+            return;
+        }
+        
+        if !key.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            error_message_for_check.set("Invalid Key".to_string());
+            notifications_for_check.error("API key contains invalid characters".to_string());
+            return;
+        }
 
-        // Clear any previous error messages
         error_message_for_check.set(String::new());
         is_connecting_clone.set(true);
         
@@ -63,19 +75,15 @@ pub fn LandingPage() -> impl IntoView {
                 let notifications_local = notifications_for_async.clone();
                 let error_message_local = error_message_for_async.clone();
                 
-                // Validate API key before redirecting
                 let handler = RequestHandler::new(key.clone());
                 match handler.test_connection().await {
                     Ok(true) => {
-                        // API key is valid, proceed with saving and navigation
                         if let Some(window) = web_sys::window() {
-                            // Save API key to storage
                             if let Ok(Some(storage)) = window.local_storage() {
                                 if let Err(_) = storage.set_item("api_key", &key) {
                                     notifications_local.warning("Failed to save API key to storage".to_string());
                                 }
                             }
-                            // Navigate to dashboard
                             window.location().set_href("/dashboard");
                         } else {
                             is_connecting_local.set(false);
@@ -84,13 +92,11 @@ pub fn LandingPage() -> impl IntoView {
                         }
                     }
                     Ok(false) => {
-                        // API key is invalid
                         is_connecting_local.set(false);
                         error_message_local.set("Invalid Key".to_string());
                         notifications_local.error("Invalid API key. Please check your key and try again.".to_string());
                     }
                     Err(e) => {
-                        // Network or other error
                         is_connecting_local.set(false);
                         error_message_local.set("Invalid Key".to_string());
                         let error_msg = match e {

@@ -80,7 +80,7 @@ pub fn DashboardHeader() -> impl IntoView {
     let fetch_user_data_initial = move || {
         #[cfg(target_arch = "wasm32")]
         {
-            if user_data.get().is_none() && !user_loading.get() {
+            if user_data.get_untracked().is_none() && !user_loading.get_untracked() {
                 user_loading.set(true);
                 is_loading.set(true);
                 spawn_local(async move {
@@ -125,42 +125,54 @@ pub fn DashboardHeader() -> impl IntoView {
     {
         let user_data_poll = user_data.clone();
         let api_connected_poll = api_connected.clone();
-        spawn_local(async move {
-            if let Some(window) = web_sys::window() {
-                let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
-                    if let Some(window) = web_sys::window() {
-                        if let Ok(Some(storage)) = window.local_storage() {
-                            if let Ok(Some(api_key)) = storage.get_item("api_key") {
-                                if !api_key.is_empty() {
-                                    let user_data = user_data_poll.clone();
-                                    let api_connected = api_connected_poll.clone();
-                                    spawn_local(async move {
-                                        let client = TorboxClient::new(api_key);
-                                        match client.get_user(Some(false)).await {
-                                            Ok(response) => {
-                                                api_connected.set(true);
-                                                if let Some(user) = response.data {
-                                                    user_data.set(Some(user));
+        let interval_created = RwSignal::new(false);
+        
+        Effect::new(move |_| {
+            if interval_created.get() {
+                return;
+            }
+            
+            interval_created.set(true);
+            let user_data_effect = user_data_poll.clone();
+            let api_connected_effect = api_connected_poll.clone();
+            
+            spawn_local(async move {
+                if let Some(window) = web_sys::window() {
+                    let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                        if let Some(window) = web_sys::window() {
+                            if let Ok(Some(storage)) = window.local_storage() {
+                                if let Ok(Some(api_key)) = storage.get_item("api_key") {
+                                    if !api_key.is_empty() {
+                                        let user_data = user_data_effect.clone();
+                                        let api_connected = api_connected_effect.clone();
+                                        spawn_local(async move {
+                                            let client = TorboxClient::new(api_key);
+                                            match client.get_user(Some(false)).await {
+                                                Ok(response) => {
+                                                    api_connected.set(true);
+                                                    if let Some(user) = response.data {
+                                                        user_data.set(Some(user));
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    api_connected.set(false);
                                                 }
                                             }
-                                            Err(_) => {
-                                                api_connected.set(false);
-                                            }
-                                        }
-                                    });
+                                        });
+                                    }
                                 }
                             }
                         }
-                    }
-                }) as Box<dyn FnMut()>);
-                
-                let _interval_id = window.set_interval_with_callback_and_timeout_and_arguments_0(
-                    closure.as_ref().unchecked_ref(),
-                    60_000,
-                );
-                
-                closure.forget();
-            }
+                    }) as Box<dyn FnMut()>);
+                    
+                    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                        closure.as_ref().unchecked_ref(),
+                        60_000,
+                    );
+                    
+                    closure.forget();
+                }
+            });
         });
     }
     

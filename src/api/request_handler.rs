@@ -353,35 +353,16 @@ pub async fn demonstrate_all_apis(api_key: String) -> Result<(), ApiError> {
         return Err(ApiError::AuthenticationError);
     }
 
-    let user = handler.get_user_info(true).await?;
-    println!("User: {:?}", user);
-
-    let subscriptions = handler.get_subscriptions().await?;
-    println!("Subscriptions: {:?}", subscriptions);
-
-    let search_results = handler.search_metadata("Star Wars".to_string()).await?;
-    println!("Search results: {:?}", search_results);
-
-    let torrents = handler.get_torrent_list(None, None, Some(0), Some(10)).await?;
-    println!("Torrents: {:?}", torrents);
-
-    let web_downloads = handler.get_web_download_list(None, None, Some(0), Some(10)).await?;
-    println!("Web downloads: {:?}", web_downloads);
-
-    let usenet_downloads = handler.get_usenet_download_list(None, None, Some(0), Some(10)).await?;
-    println!("Usenet downloads: {:?}", usenet_downloads);
-
-    let rss_feeds = handler.get_rss_feeds(None).await?;
-    println!("RSS feeds: {:?}", rss_feeds);
-
-    let notifications = handler.get_notifications().await?;
-    println!("Notifications: {:?}", notifications);
-
-    let relay_status = handler.get_relay_status().await?;
-    println!("Relay status: {:?}", relay_status);
-
-    let transfer_jobs = handler.get_transfer_jobs().await?;
-    println!("Transfer jobs: {:?}", transfer_jobs);
+    let _user = handler.get_user_info(true).await?;
+    let _subscriptions = handler.get_subscriptions().await?;
+    let _search_results = handler.search_metadata("Star Wars".to_string()).await?;
+    let _torrents = handler.get_torrent_list(None, None, Some(0), Some(10)).await?;
+    let _web_downloads = handler.get_web_download_list(None, None, Some(0), Some(10)).await?;
+    let _usenet_downloads = handler.get_usenet_download_list(None, None, Some(0), Some(10)).await?;
+    let _rss_feeds = handler.get_rss_feeds(None).await?;
+    let _notifications = handler.get_notifications().await?;
+    let _relay_status = handler.get_relay_status().await?;
+    let _transfer_jobs = handler.get_transfer_jobs().await?;
 
     Ok(())
 }
