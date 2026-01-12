@@ -142,9 +142,11 @@ impl TorboxClient {
             if api_response.success {
                 Ok(api_response)
             } else {
+                let error_msg = api_response.error
+                    .unwrap_or_else(|| api_response.detail.clone());
                 Err(ApiError::HttpError { 
                     status_code, 
-                    message: "API returned success=false".to_string() 
+                    message: error_msg
                 })
             }
         } else {
@@ -447,6 +449,7 @@ impl TorboxClient {
         Self::handle_response(response).await
     }
 
+    #[deprecated(note = "This endpoint is deprecated. Use get_queued_downloads with type='torrent' instead.")]
     pub async fn get_queued_torrents(&self) -> Result<ApiResponse<Vec<Torrent>>, ApiError> {
         let url = self.build_api_url("/v1/api/torrents/getqueued");
         

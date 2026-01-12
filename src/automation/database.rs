@@ -101,12 +101,59 @@ impl Database {
                 items_processed INTEGER DEFAULT 0,
                 success BOOLEAN DEFAULT true,
                 error_message TEXT,
+                processed_items TEXT,
                 executed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (rule_id) REFERENCES automation_rules(id)
             )",
             [],
         )
         .map_err(|e| format!("Failed to create rule_execution_log table: {}", e))?;
+
+        let processed_items_column_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('rule_execution_log') WHERE name = 'processed_items'",
+                [],
+                |row| Ok(row.get::<_, i64>(0)? > 0),
+            )
+            .unwrap_or(false);
+
+        if !processed_items_column_exists {
+            conn.execute(
+                "ALTER TABLE rule_execution_log ADD COLUMN processed_items TEXT",
+                [],
+            )
+            .map_err(|e| format!("Failed to add processed_items column: {}", e))?;
+        }
+
+        let total_items_column_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('rule_execution_log') WHERE name = 'total_items'",
+                [],
+                |row| Ok(row.get::<_, i64>(0)? > 0),
+            )
+            .unwrap_or(false);
+
+        if !total_items_column_exists {
+            let _ = conn.execute(
+                "ALTER TABLE rule_execution_log ADD COLUMN total_items INTEGER",
+                [],
+            );
+        }
+
+        let partial_column_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('rule_execution_log') WHERE name = 'partial'",
+                [],
+                |row| Ok(row.get::<_, i64>(0)? > 0),
+            )
+            .unwrap_or(false);
+
+        if !partial_column_exists {
+            let _ = conn.execute(
+                "ALTER TABLE rule_execution_log ADD COLUMN partial BOOLEAN",
+                [],
+            );
+        }
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_rules_api_key_hash ON automation_rules(api_key_hash)",
@@ -423,17 +470,23 @@ impl Database {
     pub async fn log_execution(&self, log: &ExecutionLog) -> Result<(), String> {
         let conn = self.conn.lock().await;
 
+        let processed_items_json = log.processed_items.as_ref()
+            .and_then(|items| serde_json::to_string(items).ok());
+
         conn.execute(
-            "INSERT INTO rule_execution_log (rule_id, rule_name, api_key_hash, execution_type, items_processed, success, error_message)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO rule_execution_log (rule_id, rule_name, api_key_hash, execution_type, items_processed, total_items, success, error_message, processed_items, partial)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 log.rule_id,
                 log.rule_name,
                 log.api_key_hash,
                 log.execution_type,
                 log.items_processed,
+                log.total_items,
                 log.success,
-                log.error_message
+                log.error_message,
+                processed_items_json,
+                log.partial
             ],
         )
         .map_err(|e| format!("Failed to log execution: {}", e))?;
@@ -464,10 +517,10 @@ impl Database {
 
         let max_limit = limit.min(1000);
         let query = if let Some(_id) = rule_id {
-            "SELECT id, rule_id, rule_name, api_key_hash, execution_type, items_processed, success, error_message, executed_at
+            "SELECT id, rule_id, rule_name, api_key_hash, execution_type, items_processed, total_items, success, error_message, processed_items, executed_at, partial
              FROM rule_execution_log WHERE rule_id = ? AND api_key_hash = ? ORDER BY executed_at DESC LIMIT ?"
         } else {
-            "SELECT id, rule_id, rule_name, api_key_hash, execution_type, items_processed, success, error_message, executed_at
+            "SELECT id, rule_id, rule_name, api_key_hash, execution_type, items_processed, total_items, success, error_message, processed_items, executed_at, partial
              FROM rule_execution_log WHERE api_key_hash = ? ORDER BY executed_at DESC LIMIT ?"
         };
 
@@ -477,6 +530,10 @@ impl Database {
 
         let logs: Result<Vec<ExecutionLog>, _> = if let Some(id) = rule_id {
             stmt.query_map(params![id, api_key_hash, max_limit], |row| {
+                let processed_items_json: Option<String> = row.get(9)?;
+                let processed_items = processed_items_json
+                    .and_then(|json| serde_json::from_str(&json).ok());
+                
                 Ok(ExecutionLog {
                     id: Some(row.get(0)?),
                     rule_id: row.get(1)?,
@@ -484,15 +541,22 @@ impl Database {
                     api_key_hash: row.get(3)?,
                     execution_type: row.get(4)?,
                     items_processed: row.get(5)?,
-                    success: row.get(6)?,
-                    error_message: row.get(7)?,
-                    executed_at: row.get(8)?,
+                    total_items: row.get(6)?,
+                    success: row.get(7)?,
+                    error_message: row.get(8)?,
+                    processed_items,
+                    executed_at: row.get(10)?,
+                    partial: row.get(11)?,
                 })
             })
             .map_err(|e| format!("Failed to query logs: {}", e))?
             .collect()
         } else {
             stmt.query_map(params![api_key_hash, max_limit], |row| {
+                let processed_items_json: Option<String> = row.get(9)?;
+                let processed_items = processed_items_json
+                    .and_then(|json| serde_json::from_str(&json).ok());
+                
                 Ok(ExecutionLog {
                     id: Some(row.get(0)?),
                     rule_id: row.get(1)?,
@@ -500,9 +564,12 @@ impl Database {
                     api_key_hash: row.get(3)?,
                     execution_type: row.get(4)?,
                     items_processed: row.get(5)?,
-                    success: row.get(6)?,
-                    error_message: row.get(7)?,
-                    executed_at: row.get(8)?,
+                    total_items: row.get(6)?,
+                    success: row.get(7)?,
+                    error_message: row.get(8)?,
+                    processed_items,
+                    executed_at: row.get(10)?,
+                    partial: row.get(11)?,
                 })
             })
             .map_err(|e| format!("Failed to query logs: {}", e))?

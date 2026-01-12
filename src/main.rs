@@ -38,9 +38,9 @@ async fn main() {
         .unwrap_or(90);
 
     let rule_execution_timeout_secs = std::env::var("TORBOX_RULE_EXECUTION_TIMEOUT_SECS")
-        .unwrap_or_else(|_| "30".to_string())
+        .unwrap_or_else(|_| "130".to_string())
         .parse::<u64>()
-        .unwrap_or(30);
+        .unwrap_or(130);
 
     log!("Initializing automation database at: {}", db_path);
     log!("Configuration: max_rules_per_user={}, log_retention_days={}, execution_timeout_secs={}", 

@@ -97,8 +97,19 @@ impl AutomationScheduler {
                     let rule = rule_clone.clone();
 
                     Box::pin(async move {
-                        if let Err(e) = Self::execute_rule_task(database, engine, rule, timeout_secs).await {
-                            log!("Rule execution error: {}", e);
+                        if let Err(e) = Self::execute_rule_task(database, engine, rule.clone(), timeout_secs).await {
+                            let error_str = e.to_string();
+                            let is_transient = error_str.contains("530") 
+                                || error_str.contains("504") 
+                                || error_str.contains("502") 
+                                || error_str.contains("503")
+                                || error_str.contains("Network error");
+                            
+                            if is_transient {
+                                log!("Rule '{}' execution failed due to transient API error (will retry on next schedule)", rule.name);
+                            } else {
+                                log!("Rule execution error for '{}': {}", rule.name, error_str);
+                            }
                         }
                     })
                 })
@@ -121,22 +132,14 @@ impl AutomationScheduler {
         database: Arc<Database>,
         engine: AutomationEngine,
         rule: AutomationRule,
-        timeout_secs: u64,
+        _timeout_secs: u64,
     ) -> Result<(), String> {
         let api_key = database.get_api_key(&rule.api_key_hash).await?;
 
-        log!("Executing rule: {} (timeout: {}s)", rule.name, timeout_secs);
+        log!("Executing rule: {}", rule.name);
 
-        let execution_future = engine.execute_rule(&rule, &api_key);
-        let timeout_duration = tokio::time::Duration::from_secs(timeout_secs);
-        
-        let result = match tokio::time::timeout(timeout_duration, execution_future).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                return Err(format!("Rule execution timed out after {} seconds", timeout_secs));
-            }
-        };
+        let result = engine.execute_rule(&rule, &api_key).await
+            .map_err(|e| format!("Rule execution failed: {}", e))?;
 
         let log_entry = ExecutionLog {
             id: None,
@@ -145,17 +148,22 @@ impl AutomationScheduler {
             api_key_hash: rule.api_key_hash.clone(),
             execution_type: "execution".to_string(),
             items_processed: result.items_processed,
+            total_items: Some(result.total_items),
             success: result.success,
             error_message: result.error_message.clone(),
+            processed_items: result.processed_items.clone(),
             executed_at: None,
+            partial: Some(result.partial),
         };
 
         database.log_execution(&log_entry).await?;
 
-        if result.success {
-            log!("Rule {} executed successfully: {} items processed", rule.name, result.items_processed);
+        if result.success && !result.partial {
+            log!("Rule {} executed successfully: {}/{} items processed", rule.name, result.items_processed, result.total_items);
+        } else if result.partial {
+            log!("Rule {} partially completed: {}/{} items processed", rule.name, result.items_processed, result.total_items);
         } else {
-            log!("Rule {} execution had errors: {}", rule.name, result.error_message.unwrap_or_default());
+            log!("Rule {} execution had errors: {}", rule.name, result.error_message.as_ref().unwrap_or(&"Unknown error".to_string()));
         }
 
         Ok(())

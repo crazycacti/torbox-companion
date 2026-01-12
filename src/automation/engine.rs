@@ -2,6 +2,7 @@ use crate::api::{TorboxClient, ApiError};
 use crate::api::types::Torrent;
 use crate::automation::types::*;
 use chrono::{DateTime, Utc};
+use leptos::logging::log;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct AutomationEngine;
@@ -18,45 +19,118 @@ impl AutomationEngine {
     ) -> Result<ExecutionResult, String> {
         let client = TorboxClient::new(api_key.to_string());
 
-        let torrents = client
-            .get_torrent_list(None, Some(true), None, None)
-            .await
-            .map_err(|e| format!("Failed to fetch torrents: {}", e))?;
-
-        let torrents = torrents.data.ok_or("No torrent data returned")?;
+        log!("Fetching torrent list for rule: {}", rule.name);
+        let torrents = self.fetch_torrents_with_retry(&client, rule.name.as_str(), 3).await?;
+        log!("Fetched {} torrents for rule: {}", torrents.len(), rule.name);
 
         let matching_items = self.evaluate_conditions(rule, &torrents);
+        log!("Rule '{}' matched {} items", rule.name, matching_items.len());
 
+        let total_items = matching_items.len() as i32;
         if matching_items.is_empty() {
             return Ok(ExecutionResult {
                 items_processed: 0,
+                total_items: 0,
                 success: true,
                 error_message: None,
+                processed_items: Some(Vec::new()),
+                partial: false,
             });
         }
 
         let mut error_count = 0;
         let mut errors: Vec<String> = Vec::new();
+        let mut processed_items: Vec<ProcessedItem> = Vec::new();
 
-        for item in &matching_items {
-            if let Err(e) = self.execute_action(&rule.action_config, &client, item).await {
+        let action_name = match rule.action_config.action_type {
+            ActionType::StopSeeding => "Stop Seeding",
+            ActionType::Delete => "Delete",
+            ActionType::Stop => "Stop",
+            ActionType::Resume => "Resume",
+            ActionType::Restart => "Restart",
+            ActionType::Reannounce => "Reannounce",
+            ActionType::ForceStart => "Force Start",
+        }.to_string();
+
+        log!("Processing {} items for rule '{}' with action: {}", matching_items.len(), rule.name, action_name);
+        let per_item_timeout = tokio::time::Duration::from_secs(10);
+        
+        for (idx, item) in matching_items.iter().enumerate() {
+            if idx > 0 && idx % 10 == 0 {
+                log!("Processed {}/{} items for rule '{}'", idx, matching_items.len(), rule.name);
+            }
+            
+            let action_future = self.execute_action(&rule.action_config, &client, item);
+            let result = match tokio::time::timeout(per_item_timeout, action_future).await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => {
+                    if e.contains("429") || e.contains("Rate limit") {
+                        log!("Rate limit hit for rule '{}', waiting 2 seconds before retry...", rule.name);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        let retry_result = self.execute_action(&rule.action_config, &client, item).await;
+                        if retry_result.is_err() {
+                            log!("Retry failed for rule '{}'", rule.name);
+                        }
+                        retry_result
+                    } else {
+                        Err(e)
+                    }
+                }
+                Err(_) => {
+                    log!("Action timed out after 10 seconds for rule '{}'", rule.name);
+                    Err(format!("Action timed out after 10 seconds"))
+                }
+            };
+            
+            let success = result.is_ok();
+            let error = result.as_ref().err().map(|e| e.to_string());
+
+            processed_items.push(ProcessedItem {
+                id: item.id,
+                name: item.name.clone(),
+                action: action_name.clone(),
+                success,
+                error: error.clone(),
+            });
+
+            if let Err(e) = result {
                 error_count += 1;
-                errors.push(format!("Torrent {} ({}): {}", item.id, item.name, e));
+                errors.push(e);
                 if errors.len() >= 10 {
                     errors.push(format!("... and {} more errors", error_count - 10));
-                    break;
                 }
             }
         }
 
+        let items_processed = processed_items.len() as i32;
+        let partial = items_processed < total_items;
+        
+        log!("Completed processing {}/{} items for rule '{}' ({} errors, partial: {})", 
+             items_processed, total_items, rule.name, error_count, partial);
+        
         Ok(ExecutionResult {
-            items_processed: matching_items.len() as i32,
-            success: error_count == 0,
-            error_message: if error_count > 0 {
-                Some(format!("{} of {} actions failed. {}", error_count, matching_items.len(), errors.join("; ")))
+            items_processed,
+            total_items,
+            success: error_count == 0 && !partial,
+            error_message: if error_count > 0 || partial {
+                let mut msg_parts = Vec::new();
+                if partial {
+                    msg_parts.push(format!("Only processed {}/{} items", items_processed, total_items));
+                }
+                if error_count > 0 {
+                    let error_summary = if error_count <= 3 {
+                        errors.iter().take(error_count).cloned().collect::<Vec<_>>().join("; ")
+                    } else {
+                        format!("{} errors occurred (see processed items for details)", error_count)
+                    };
+                    msg_parts.push(format!("{} of {} actions failed. {}", error_count, items_processed, error_summary));
+                }
+                Some(msg_parts.join(". "))
             } else {
                 None
             },
+            processed_items: Some(processed_items),
+            partial,
         })
     }
 
@@ -364,13 +438,64 @@ impl AutomationEngine {
         }
         Ok(())
     }
+
+    async fn fetch_torrents_with_retry(
+        &self,
+        client: &TorboxClient,
+        rule_name: &str,
+        max_retries: u32,
+    ) -> Result<Vec<Torrent>, String> {
+        let mut last_error = None;
+        
+        for attempt in 1..=max_retries {
+            match client.get_torrent_list(None, Some(true), None, None).await {
+                Ok(response) => {
+                    if let Some(data) = response.data {
+                        if attempt > 1 {
+                            log!("Successfully fetched torrent list for rule '{}' on attempt {}", rule_name, attempt);
+                        }
+                        return Ok(data);
+                    } else {
+                        return Err("No torrent data returned".to_string());
+                    }
+                }
+                Err(e) => {
+                    let error_str = e.to_string();
+                    let is_transient = error_str.contains("530") 
+                        || error_str.contains("504") 
+                        || error_str.contains("502") 
+                        || error_str.contains("503")
+                        || error_str.contains("Network error");
+                    
+                    last_error = Some(error_str.clone());
+                    
+                    if is_transient && attempt < max_retries {
+                        let delay_secs = attempt as u64;
+                        log!("Transient error fetching torrents for rule '{}' (attempt {}/{}): {}. Retrying in {} seconds...", 
+                             rule_name, attempt, max_retries, error_str, delay_secs);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
+                        continue;
+                    } else {
+                        if !is_transient {
+                            return Err(format!("Failed to fetch torrents: {}", error_str));
+                        }
+                    }
+                }
+            }
+        }
+        
+        Err(format!("Failed to fetch torrents after {} attempts: {}", max_retries, last_error.unwrap_or_else(|| "Unknown error".to_string())))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionResult {
     pub items_processed: i32,
+    pub total_items: i32,
     pub success: bool,
     pub error_message: Option<String>,
+    pub processed_items: Option<Vec<ProcessedItem>>,
+    pub partial: bool,
 }
 
 impl Default for AutomationEngine {

@@ -402,14 +402,14 @@ impl From<WebDownload> for DownloadItem {
         };
 
         let final_status = detect_stalled_status(
-            &web_dl.status,
-            0, 
-            0, 
+            &web_dl.download_state,
+            web_dl.download_speed, 
+            web_dl.upload_speed, 
             None, 
             None, 
             None, 
             &web_dl.created_at,
-            None, 
+            Some(&web_dl.updated_at), 
         );
 
         Self {
@@ -420,37 +420,34 @@ impl From<WebDownload> for DownloadItem {
             status: final_status,
             download_type: DownloadType::WebDownload,
             progress: web_dl.progress,
-            download_speed: 0, 
-            upload_speed: 0,
-            active: {
-                let status_lower = web_dl.status.to_lowercase();
-                status_lower == "downloading" || status_lower == "active"
-            },
+            download_speed: web_dl.download_speed, 
+            upload_speed: web_dl.upload_speed,
+            active: web_dl.active,
             files: web_dl.files.into_iter().map(|f| DownloadFile {
                 id: f.id,
                 name: f.name,
                 size: f.size,
-                md5: None,
+                md5: f.md5,
                 hash: None,
                 zipped: None,
-                s3_path: None,
+                s3_path: f.s3_path,
                 infected: None,
-                mimetype: None,
-                short_name: None,
+                mimetype: f.mimetype,
+                short_name: f.short_name,
                 absolute_path: None,
                 opensubtitles_hash: None,
             }).collect(),
             is_season,
             season_info,
-            eta: None, 
+            eta: Some(web_dl.eta), 
             total_downloaded: None, 
             private: false, 
             ratio: None, 
             magnet: None, 
-            source_url: Some(web_dl.url),
+            source_url: None,
             seeds: None, 
             peers: None,
-            hash: None,
+            hash: Some(web_dl.hash),
         }
     }
 }
@@ -1252,7 +1249,8 @@ pub fn DownloadsTable(
                                             if let Some(webdl_array) = webdl_array {
                                                 for item in webdl_array {
                                                     if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
-                                                        web_dl.status = "queued".to_string();
+                                                        web_dl.download_state = "queued".to_string();
+                                                        web_dl.active = false;
                                                         all_downloads.push(DownloadItem::from(web_dl));
                                                         total_processed += 1;
                                                         if total_processed % PROCESSING_YIELD == 0 {
@@ -1531,7 +1529,8 @@ pub fn DownloadsTable(
                                             if let Some(webdl_array) = webdl_array {
                                                 for item in webdl_array {
                                                     if let Ok(mut web_dl) = serde_json::from_value::<WebDownload>(item.clone()) {
-                                                        web_dl.status = "queued".to_string();
+                                                        web_dl.download_state = "queued".to_string();
+                                                        web_dl.active = false;
                                                         let item = DownloadItem::from(web_dl);
                                                         let key = (item.id, item.download_type.clone());
                                                         seen_ids.insert(key.clone());

@@ -209,22 +209,38 @@ pub struct CreateTorrentRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebDownload {
     pub id: i32,
+    pub hash: String,
     pub name: String,
-    pub url: String,
-    pub status: String,
-    pub progress: f32,
+    pub auth_id: String,
+    pub server: i32,
     pub size: i64,
-    pub files: Vec<WebDownloadFile>,
+    pub active: bool,
     pub created_at: String,
-    pub completed_at: Option<String>,
+    pub updated_at: String,
+    pub download_state: String,
+    pub progress: f32,
+    pub download_speed: i64,
+    pub upload_speed: i64,
+    pub eta: i32,
+    pub torrent_file: bool,
+    pub expires_at: Option<String>,
+    pub download_present: bool,
+    pub download_finished: bool,
+    pub error: Option<String>,
+    pub files: Vec<WebDownloadFile>,
+    pub inactive_check: i32,
+    pub availability: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebDownloadFile {
     pub id: i32,
+    pub md5: Option<String>,
+    pub s3_path: Option<String>,
     pub name: String,
     pub size: i64,
-    pub progress: f32,
+    pub mimetype: Option<String>,
+    pub short_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

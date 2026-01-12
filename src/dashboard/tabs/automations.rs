@@ -11,6 +11,7 @@ use wasm_bindgen::JsCast;
 use js_sys;
 use std::sync::Arc;
 use crate::notifications::{use_confirmation, show_confirmation, ConfirmationVariant};
+use crate::dashboard::components::loading_spinner::{LoadingSpinner, SpinnerSize, SpinnerVariant};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AutomationRule {
@@ -25,6 +26,15 @@ pub struct AutomationRule {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProcessedItem {
+    pub id: i32,
+    pub name: String,
+    pub action: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionLog {
     pub id: Option<i64>,
     pub rule_id: i64,
@@ -32,9 +42,14 @@ pub struct ExecutionLog {
     pub api_key_hash: String,
     pub execution_type: String,
     pub items_processed: i32,
+    #[serde(default)]
+    pub total_items: Option<i32>,
     pub success: bool,
     pub error_message: Option<String>,
+    pub processed_items: Option<Vec<ProcessedItem>>,
     pub executed_at: Option<String>,
+    #[serde(default)]
+    pub partial: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -72,6 +87,8 @@ pub fn AutomationsTab() -> impl IntoView {
     let confirmation_state = use_confirmation();
     let rule_limit = RwSignal::new(None::<RuleLimitInfo>);
     let selected_rules = RwSignal::new(std::collections::HashSet::<i64>::new());
+    let running_rules = RwSignal::new(std::collections::HashSet::<i64>::new());
+    let expanded_items = RwSignal::new(std::collections::HashSet::<i64>::new());
 
     let fetch_rules = move || {
         #[cfg(feature = "hydrate")]
@@ -548,11 +565,11 @@ pub fn AutomationsTab() -> impl IntoView {
                             <button
                                 class="p-4 rounded-lg border text-left transition-colors hover:opacity-90 w-full"
                                 style="background-color: var(--bg-secondary); border-color: var(--border-secondary); color: var(--text-primary); display: flex; flex-direction: column; align-items: flex-start;"
-                                on:click=move |_| create_preset_rule("Delete Old Torrents".to_string(), 60, "Age".to_string(), "GreaterThan".to_string(), 168.0, "Delete".to_string())
+                                on:click=move |_| create_preset_rule("Delete Old Torrents".to_string(), 60, "Age".to_string(), "GreaterThan".to_string(), 720.0, "Delete".to_string())
                             >
-                                <div class="font-semibold mb-1.5" style="line-height: 1.5;">"Delete Old (7 days)"</div>
+                                <div class="font-semibold mb-1.5" style="line-height: 1.5;">"Delete Old (30 days)"</div>
                                 <div class="text-xs" style="color: var(--text-secondary); line-height: 1.5;">
-                                    "Deletes torrents older than 7 days"
+                                    "Deletes torrents older than 30 days"
                                 </div>
                             </button>
                             <button
@@ -759,7 +776,30 @@ pub fn AutomationsTab() -> impl IntoView {
                                 };
                                 let run_count = move || logs_for_rule().len();
                                 let last_result = move || {
-                                    logs_for_rule().first().map(|log| (log.success, log.items_processed, log.error_message.clone()))
+                                    logs_for_rule().first().map(|log| {
+                                        let total = log.total_items.unwrap_or(log.items_processed);
+                                        (log.success, log.items_processed, total, log.error_message.clone(), log.processed_items.clone(), log.partial.unwrap_or(false))
+                                    })
+                                };
+                                let expanded_items_clone = expanded_items.clone();
+                                let is_expanded = move || {
+                                    if let Some(id) = rule_id {
+                                        expanded_items_clone.get().contains(&id)
+                                    } else {
+                                        false
+                                    }
+                                };
+                                let expanded_items_toggle = expanded_items.clone();
+                                let toggle_expanded = move |_| {
+                                    if let Some(id) = rule_id {
+                                        expanded_items_toggle.update(|set| {
+                                            if set.contains(&id) {
+                                                set.remove(&id);
+                                            } else {
+                                                set.insert(id);
+                                            }
+                                        });
+                                    }
                                 };
                                 let next_run = move || {
                                     if let Some(id) = rule_id {
@@ -852,29 +892,115 @@ pub fn AutomationsTab() -> impl IntoView {
                                                         </p>
                                                     </Show>
                                                     <Show when=move || last_result().is_some()>
-                                                        <p class="text-xs" style={move || {
-                                                            if let Some((success, _, _)) = last_result() {
-                                                                if success {
-                                                                    "color: var(--text-success); line-height: 1.5;"
-                                                                } else {
-                                                                    "color: var(--text-error); line-height: 1.5;"
-                                                                }
-                                                            } else {
-                                                                "color: var(--text-secondary); line-height: 1.5;"
-                                                            }
-                                                        }}>
-                                                            {move || {
-                                                                if let Some((success, items, error)) = last_result() {
-                                                                    if success {
-                                                                        format!("Last result: {} items processed", items)
+                                                        <div class="space-y-2">
+                                                            <p class="text-sm font-medium" style={move || {
+                                                                if let Some((success, _, _, _, _, partial)) = last_result() {
+                                                                    if success && !partial {
+                                                                        "color: var(--text-success); line-height: 1.5;"
+                                                                    } else if partial {
+                                                                        "color: var(--text-warning); line-height: 1.5;"
                                                                     } else {
-                                                                        format!("Last result: Failed - {}", error.unwrap_or_else(|| "Unknown error".to_string()))
+                                                                        "color: var(--text-error); line-height: 1.5;"
                                                                     }
                                                                 } else {
-                                                                    String::new()
+                                                                    "color: var(--text-secondary); line-height: 1.5;"
                                                                 }
-                                                            }}
-                                                        </p>
+                                                            }}>
+                                                                {move || {
+                                                                    if let Some((success, items_processed, total_items, error, processed_items, partial)) = last_result() {
+                                                                        if partial {
+                                                                            format!("{}/{} items processed (partial)", items_processed, total_items)
+                                                                        } else if success {
+                                                                            if total_items > 0 {
+                                                                                format!("{}/{} items processed", items_processed, total_items)
+                                                                            } else {
+                                                                                "No items matched conditions".to_string()
+                                                                            }
+                                                                        } else {
+                                                                            format!("Failed: {}/{} processed - {}", items_processed, total_items, error.unwrap_or_else(|| "Unknown error".to_string()))
+                                                                        }
+                                                                    } else {
+                                                                        String::new()
+                                                                    }
+                                                                }}
+                                                            </p>
+                                                            <Show when=move || {
+                                                                if let Some((_, items_processed, _, _, processed_items, _)) = last_result() {
+                                                                    items_processed > 0 && processed_items.is_some() && !processed_items.as_ref().unwrap().is_empty()
+                                                                } else {
+                                                                    false
+                                                                }
+                                                            }>
+                                                                <div class="mt-1">
+                                                                    <button
+                                                                        class="text-xs cursor-pointer hover:opacity-80 transition-opacity font-medium flex items-center gap-1"
+                                                                        style="color: var(--text-secondary); background: none; border: none; padding: 0;"
+                                                                        on:click=toggle_expanded
+                                                                    >
+                                                                        <span>{move || {
+                                                                            if is_expanded() {
+                                                                                "▼ Hide Items"
+                                                                            } else {
+                                                                                "▶ Show Items"
+                                                                            }
+                                                                        }}</span>
+                                                                        {move || {
+                                                                            if let Some((_, items_processed, total_items, _, _, _)) = last_result() {
+                                                                                format!("({})", items_processed)
+                                                                            } else {
+                                                                                String::new()
+                                                                            }
+                                                                        }}
+                                                                    </button>
+                                                                    <Show when=move || is_expanded()>
+                                                                        <div class="mt-2 p-2 rounded border" style="background-color: var(--bg-tertiary); border-color: var(--border-secondary);">
+                                                                            <div class="space-y-1 max-h-64 overflow-y-auto">
+                                                                                <For
+                                                                                    each=move || {
+                                                                                        if let Some((_, _, _, _, Some(items), _)) = last_result() {
+                                                                                            items.iter().cloned().collect::<Vec<_>>()
+                                                                                        } else {
+                                                                                            Vec::new()
+                                                                                        }
+                                                                                    }
+                                                                                    key=|item| item.id
+                                                                                    children=move |item: ProcessedItem| {
+                                                                                        let item_name = item.name.clone();
+                                                                                        let item_name_title = item.name.clone();
+                                                                                        let item_action = item.action.clone();
+                                                                                        let item_success = item.success;
+                                                                                        let item_error = item.error.clone().unwrap_or_default();
+                                                                                        view! {
+                                                                                            <div class="flex items-center justify-between text-xs" style="color: var(--text-secondary);">
+                                                                                                <span class="truncate flex-1 mr-2" title={item_name_title}>
+                                                                                                    {item_name}
+                                                                                                </span>
+                                                                                                <div class="flex items-center gap-2 shrink-0">
+                                                                                                    <span class="px-1.5 py-0.5 rounded text-xs" style={
+                                                                                                        if item_success {
+                                                                                                            "background-color: var(--bg-success); color: var(--text-success);"
+                                                                                                        } else {
+                                                                                                            "background-color: var(--bg-error); color: var(--text-error);"
+                                                                                                        }
+                                                                                                    }>
+                                                                                                        {item_action}
+                                                                                                    </span>
+                                                                                                    <Show when=move || !item_success>
+                                                                                                        <span class="text-xs" style="color: var(--text-error);" title={item_error.clone()}>
+                                                                                                            "⚠"
+                                                                                                        </span>
+                                                                                                    </Show>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        }
+                                                                                    }
+                                                                                />
+                                                                            </div>
+                                                                        </div>
+                                                                    </Show>
+                                                                </div>
+                                                            </Show>
+                                                        </div>
                                                     </Show>
                                                 </div>
                                             </div>
@@ -909,13 +1035,28 @@ pub fn AutomationsTab() -> impl IntoView {
                                                     "Edit"
                                                 </button>
                                                 <button
-                                                    class="px-4 py-2 text-sm font-medium rounded-lg transition-all shrink-0 border hover:opacity-90"
+                                                    class="px-4 py-2 text-sm font-medium rounded-lg transition-all shrink-0 border hover:opacity-90 flex items-center gap-2"
                                                     style="background-color: var(--accent-primary); color: var(--text-on-accent); border-color: var(--accent-primary); line-height: 1.5;"
+                                                    disabled=move || {
+                                                        if let Some(id) = rule_id {
+                                                            running_rules.get().contains(&id)
+                                                        } else {
+                                                            false
+                                                        }
+                                                    }
                                                     on:click=move |_| {
                                                         if let Some(id) = rule_id {
                                                             let rule_id_clone = id;
+                                                            let running_rules_clone = running_rules.clone();
+                                                            let error_clone = error.clone();
+                                                            let rules_clone = rules.clone();
+                                                            let loading_clone = loading.clone();
+                                                            let rule_limit_clone = rule_limit.clone();
                                                             #[cfg(feature = "hydrate")]
                                                             {
+                                                                running_rules_clone.update(|set| {
+                                                                    set.insert(rule_id_clone);
+                                                                });
                                                                 spawn_local(async move {
                                                                     if let Some(window) = web_sys::window() {
                                                                         if let Ok(Some(storage)) = window.local_storage() {
@@ -945,46 +1086,135 @@ pub fn AutomationsTab() -> impl IntoView {
                                                                                                 if resp.status() == 200 {
                                                                                                     if let Ok(result) = serde_json::from_str::<serde_json::Value>(&text) {
                                                                                                         if let Some(data) = result.get("data") {
-                                                                                                            if let Some(items) = data.get("items_processed") {
+                                                                                                            if let Some(items_processed) = data.get("items_processed") {
+                                                                                                                let items_count = items_processed.as_i64().unwrap_or(0);
+                                                                                                                let total_items = data.get("total_items").and_then(|v| v.as_i64()).unwrap_or(items_count);
+                                                                                                                let partial = data.get("partial").and_then(|v| v.as_bool()).unwrap_or(false);
                                                                                                                 if let Some(success) = data.get("success") {
-                                                                                                                    if success.as_bool().unwrap_or(false) {
-                                                                                                                        let count = items.as_i64().unwrap_or(0);
-                                                                                                                        if count > 0 {
-                                                                                                                            error.set(Some(format!("Rule executed successfully: {} items processed", count)));
+                                                                                                                    if success.as_bool().unwrap_or(false) && !partial {
+                                                                                                                        if total_items > 0 {
+                                                                                                                            error_clone.set(Some(format!("Rule executed successfully: {}/{} items processed", items_count, total_items)));
                                                                                                                         } else {
-                                                                                                                            error.set(Some("Rule executed: No items matched conditions".to_string()));
+                                                                                                                            error_clone.set(Some("Rule executed: No items matched conditions".to_string()));
                                                                                                                         }
+                                                                                                                    } else if partial {
+                                                                                                                        error_clone.set(Some(format!("Rule partially completed: {}/{} items processed", items_count, total_items)));
                                                                                                                     } else {
                                                                                                                         if let Some(err_msg) = data.get("error_message") {
-                                                                                                                            error.set(Some(format!("Rule execution had errors: {}", err_msg.as_str().unwrap_or("Unknown error"))));
+                                                                                                                            error_clone.set(Some(format!("Rule execution had errors: {}", err_msg.as_str().unwrap_or("Unknown error"))));
                                                                                                                         } else {
-                                                                                                                            error.set(Some("Rule execution failed".to_string()));
+                                                                                                                            error_clone.set(Some("Rule execution failed".to_string()));
                                                                                                                         }
                                                                                                                     }
                                                                                                                 }
                                                                                                             }
                                                                                                         }
                                                                                                     }
-                                                                                                    fetch_rules();
-                                                                                                    fetch_rule_limit();
+                                                                                                    loading_clone.set(true);
+                                                                                                    error_clone.set(None);
+                                                                                                    let fetch_url = "/api/automation/rules";
+                                                                                                    let fetch_headers = web_sys::Headers::new().unwrap();
+                                                                                                    fetch_headers.set("Authorization", &format!("Bearer {}", api_key)).unwrap();
+                                                                                                    let fetch_init = {
+                                                                                                        let mut i = web_sys::RequestInit::new();
+                                                                                                        i.set_method("GET");
+                                                                                                        i.set_headers(&fetch_headers);
+                                                                                                        i
+                                                                                                    };
+                                                                                                    let fetch_promise = window.fetch_with_str_and_init(fetch_url, &fetch_init);
+                                                                                                    let fetch_future = wasm_bindgen_futures::JsFuture::from(fetch_promise);
+                                                                                                    if let Ok(fetch_response) = fetch_future.await {
+                                                                                                        let fetch_resp: web_sys::Response = fetch_response.dyn_into().unwrap();
+                                                                                                        if fetch_resp.status() == 200 {
+                                                                                                            let fetch_text_promise = fetch_resp.text().unwrap();
+                                                                                                            let fetch_text_future = wasm_bindgen_futures::JsFuture::from(fetch_text_promise);
+                                                                                                            if let Ok(fetch_text_value) = fetch_text_future.await {
+                                                                                                                if let Some(fetch_text) = fetch_text_value.as_string() {
+                                                                                                                    if let Ok(fetch_api_response) = serde_json::from_str::<ApiResponse<Vec<AutomationRule>>>(&fetch_text) {
+                                                                                                                        if let Some(fetch_data) = fetch_api_response.data {
+                                                                                                                            rules_clone.set(fetch_data);
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                    let limit_url = "/api/automation/rules/limit";
+                                                                                                    let limit_headers = web_sys::Headers::new().unwrap();
+                                                                                                    limit_headers.set("Authorization", &format!("Bearer {}", api_key)).unwrap();
+                                                                                                    let limit_init = {
+                                                                                                        let mut i = web_sys::RequestInit::new();
+                                                                                                        i.set_method("GET");
+                                                                                                        i.set_headers(&limit_headers);
+                                                                                                        i
+                                                                                                    };
+                                                                                                    let limit_promise = window.fetch_with_str_and_init(limit_url, &limit_init);
+                                                                                                    let limit_future = wasm_bindgen_futures::JsFuture::from(limit_promise);
+                                                                                                    if let Ok(limit_response) = limit_future.await {
+                                                                                                        let limit_resp: web_sys::Response = limit_response.dyn_into().unwrap();
+                                                                                                        if limit_resp.status() == 200 {
+                                                                                                            let limit_text_promise = limit_resp.text().unwrap();
+                                                                                                            let limit_text_future = wasm_bindgen_futures::JsFuture::from(limit_text_promise);
+                                                                                                            if let Ok(limit_text_value) = limit_text_future.await {
+                                                                                                                if let Some(limit_text) = limit_text_value.as_string() {
+                                                                                                                    if let Ok(limit_api_response) = serde_json::from_str::<ApiResponse<RuleLimitInfo>>(&limit_text) {
+                                                                                                                        if let Some(limit_data) = limit_api_response.data {
+                                                                                                                            rule_limit_clone.set(Some(limit_data));
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                    loading_clone.set(false);
                                                                                                 } else {
-                                                                                                    error.set(Some(format!("Failed to run rule: {}", resp.status())));
+                                                                                                    error_clone.set(Some(format!("Failed to run rule: {}", resp.status())));
                                                                                                 }
                                                                                             }
                                                                                         }
                                                                                     } else {
-                                                                                        error.set(Some("Network request failed".to_string()));
+                                                                                        error_clone.set(Some("Network request failed".to_string()));
                                                                                     }
+                                                                                } else {
+                                                                                    error_clone.set(Some("No API key found".to_string()));
                                                                                 }
+                                                                            } else {
+                                                                                error_clone.set(Some("No API key found".to_string()));
                                                                             }
+                                                                        } else {
+                                                                            error_clone.set(Some("Storage not available".to_string()));
                                                                         }
+                                                                    } else {
+                                                                        error_clone.set(Some("Window not available".to_string()));
                                                                     }
+                                                                    running_rules_clone.update(|set| {
+                                                                        set.remove(&rule_id_clone);
+                                                                    });
                                                                 });
                                                             }
                                                         }
                                                     }
                                                 >
-                                                    "Run Now"
+                                                    <Show when=move || {
+                                                        if let Some(id) = rule_id {
+                                                            running_rules.get().contains(&id)
+                                                        } else {
+                                                            false
+                                                        }
+                                                    }>
+                                                        <LoadingSpinner size=SpinnerSize::Small variant=SpinnerVariant::Default/>
+                                                    </Show>
+                                                    {move || {
+                                                        if let Some(id) = rule_id {
+                                                            if running_rules.get().contains(&id) {
+                                                                "Running..."
+                                                            } else {
+                                                                "Run Now"
+                                                            }
+                                                        } else {
+                                                            "Run Now"
+                                                        }
+                                                    }}
                                                 </button>
                                                 <button
                                                     class="px-4 py-2 text-sm font-medium rounded-lg transition-all shrink-0 border hover:opacity-90"
@@ -1144,8 +1374,7 @@ fn RuleModal(
             when=move || show.get()
         >
             <div 
-                class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
-                style="background-color: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px);"
+                style="position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: 100vw !important; height: 100vh !important; background-color: rgba(0, 0, 0, 0.75) !important; backdrop-filter: blur(4px) !important; z-index: 2147483647 !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: 0.5rem !important; overflow-y: auto !important; box-sizing: border-box !important;"
                 on:click=move |_| {
                     if !saving.get() {
                         show.set(false);
@@ -1153,22 +1382,22 @@ fn RuleModal(
                 }
             >
                 <div 
-                    class="rounded-xl border max-w-3xl w-full max-h-[92vh] overflow-hidden flex flex-col shadow-2xl modal-content"
-                    style="background-color: var(--bg-card); border-color: var(--border-secondary);"
+                    class="rounded-xl border shadow-2xl modal-content"
+                    style="background-color: var(--bg-card) !important; border-color: var(--border-secondary) !important; z-index: 2147483647 !important; position: relative !important; width: calc(100% - 1rem) !important; max-width: 48rem !important; max-height: calc(100vh - 1rem) !important; margin: auto !important; overflow: hidden !important; display: flex !important; flex-direction: column !important;"
                     on:click=|ev| ev.stop_propagation()
                 >
-                    <div class="flex-shrink-0 px-6 pt-6 pb-4 border-b" style="border-color: var(--border-secondary);">
+                    <div class="flex-shrink-0 px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4 border-b" style="border-color: var(--border-secondary);">
                         <div class="flex items-center justify-between">
                             <div>
-                                <h3 class="text-2xl font-bold mb-1" style="color: var(--text-primary); line-height: 1.3;">
+                                <h3 class="text-xl sm:text-2xl font-bold mb-1" style="color: var(--text-primary); line-height: 1.3;">
                                     {move || if editing_rule_id.get().is_some() { "Edit Automation Rule" } else { "Create Automation Rule" }}
                                 </h3>
-                                <p class="text-sm" style="color: var(--text-secondary); line-height: 1.5;">
+                                <p class="text-xs sm:text-sm" style="color: var(--text-secondary); line-height: 1.5;">
                                     {move || if editing_rule_id.get().is_some() { "Modify your automation rule settings" } else { "Set up a new automation to manage your torrents" }}
                                 </p>
                             </div>
                             <button
-                                class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors shrink-0 hover:bg-opacity-10"
+                                class="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-lg transition-colors shrink-0 hover:bg-opacity-10"
                                 style="color: var(--text-secondary); background-color: var(--bg-secondary);"
                                 on:click=move |_| {
                                     if !saving.get() {
@@ -1182,7 +1411,7 @@ fn RuleModal(
                         </div>
                     </div>
 
-                    <div class="flex-1 overflow-y-auto px-8 py-8">
+                    <div class="flex-1 overflow-y-auto px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8" style="min-height: 0 !important;">
                         <Show when=move || save_error.get().is_some()>
                             <div class="mb-6 p-4 rounded-lg border" style="background-color: var(--bg-error); border-color: var(--border-error, #ef4444); color: var(--text-error); line-height: 1.5;">
                                 <div class="flex items-start">
@@ -1318,7 +1547,7 @@ fn RuleModal(
                                     </h4>
                                     <div class="h-0.5 w-12 rounded-full" style="background-color: var(--accent-primary);"></div>
                                     <p class="text-xs mt-3" style="color: var(--text-secondary); line-height: 1.6;">
-                                        "Define what criteria torrents must meet for this rule to apply. The rule will only act on torrents matching all conditions."
+                                        "Define what criteria torrents must meet for this rule to apply. Currently, only one condition is supported per rule."
                                     </p>
                                 </div>
                                 <div class="space-y-6">
@@ -1588,7 +1817,7 @@ fn RuleModal(
                         </div>
                     </div>
 
-                    <div class="flex-shrink-0 px-8 py-6 border-t flex flex-row justify-end gap-4" style="border-color: var(--border-primary); background-color: var(--bg-secondary);">
+                    <div class="flex-shrink-0 px-4 sm:px-6 md:px-8 py-4 sm:py-5 md:py-6 border-t flex flex-row justify-end gap-3 sm:gap-4" style="border-color: var(--border-primary); background-color: var(--bg-secondary);">
                         <button
                             class="px-6 py-3 rounded-lg transition-all font-semibold text-sm"
                             style="background-color: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-secondary); line-height: 1.5; display: inline-flex !important; align-items: center; justify-content: center; width: auto !important; min-width: 100px; max-width: none !important; flex: 0 0 auto !important;"

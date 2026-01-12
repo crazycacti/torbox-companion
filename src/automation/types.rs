@@ -83,6 +83,15 @@ pub enum ActionType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedItem {
+    pub id: i32,
+    pub name: String,
+    pub action: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionLog {
     pub id: Option<i64>,
     pub rule_id: i64,
@@ -90,9 +99,14 @@ pub struct ExecutionLog {
     pub api_key_hash: String,
     pub execution_type: String,
     pub items_processed: i32,
+    #[serde(default)]
+    pub total_items: Option<i32>,
     pub success: bool,
     pub error_message: Option<String>,
+    pub processed_items: Option<Vec<ProcessedItem>>,
     pub executed_at: Option<String>,
+    #[serde(default)]
+    pub partial: Option<bool>,
 }
 
 #[derive(Debug, Clone)]

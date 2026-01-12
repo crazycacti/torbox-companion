@@ -542,22 +542,11 @@ async fn force_run_rule(
     use crate::automation::engine::AutomationEngine;
     let engine = AutomationEngine::new();
     
-    let execution_future = engine.execute_rule(&rule, &api_key);
-    let timeout_duration = tokio::time::Duration::from_secs(state.execution_timeout_secs);
-    
-    let result = match tokio::time::timeout(timeout_duration, execution_future).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(e)) => {
+    let result = match engine.execute_rule(&rule, &api_key).await {
+        Ok(result) => result,
+        Err(e) => {
             log!("Failed to execute rule: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-        Err(_) => {
-            log!("Rule execution timed out after {} seconds", state.execution_timeout_secs);
-            return Ok(Json(ApiResponse {
-                success: false,
-                error: Some(format!("Rule execution timed out after {} seconds", state.execution_timeout_secs)),
-                data: None,
-            }));
         }
     };
 
@@ -568,9 +557,12 @@ async fn force_run_rule(
         api_key_hash: rule.api_key_hash.clone(),
         execution_type: "manual".to_string(),
         items_processed: result.items_processed,
+        total_items: Some(result.total_items),
         success: result.success,
         error_message: result.error_message.clone(),
+        processed_items: result.processed_items.clone(),
         executed_at: None,
+        partial: Some(result.partial),
     };
 
     state.database.log_execution(&log_entry).await
@@ -579,8 +571,10 @@ async fn force_run_rule(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    if result.success {
-        log!("Rule {} force run successful: {} items processed", rule.name, result.items_processed);
+    if result.success && !result.partial {
+        log!("Rule {} force run successful: {}/{} items processed", rule.name, result.items_processed, result.total_items);
+    } else if result.partial {
+        log!("Rule {} force run partially completed: {}/{} items processed", rule.name, result.items_processed, result.total_items);
     } else {
         log!("Rule {} force run had errors: {}", rule.name, result.error_message.as_ref().unwrap_or(&"Unknown error".to_string()));
     }
