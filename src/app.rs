@@ -17,7 +17,7 @@ fn rybbit_analytics_scripts() -> impl IntoView {
     let script_src = std::env::var("RYBBIT_SCRIPT_SRC").unwrap_or_default();
     let script_src = script_src.trim();
     if site_id.is_empty() || script_src.is_empty() {
-        return ().into_view();
+        return view! {}.into_any();
     }
     let script_src = script_src.to_string();
 
@@ -34,6 +34,7 @@ fn rybbit_analytics_scripts() -> impl IntoView {
             {boot}
         </script>
     }
+    .into_any()
 }
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
