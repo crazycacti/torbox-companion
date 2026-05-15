@@ -10,6 +10,32 @@ use crate::dashboard::MainDashboard;
 use crate::stream_page::StreamPage;
 use crate::notifications::{NotificationContext, NotificationContainer, ConfirmationModal, ConfirmationModalState};
 
+#[cfg(feature = "ssr")]
+fn rybbit_analytics_scripts() -> impl IntoView {
+    let site_id = std::env::var("RYBBIT_SITE_ID").unwrap_or_default();
+    let site_id = site_id.trim();
+    let script_src = std::env::var("RYBBIT_SCRIPT_SRC").unwrap_or_default();
+    let script_src = script_src.trim();
+    if site_id.is_empty() || script_src.is_empty() {
+        return ().into_view();
+    }
+    let script_src = script_src.to_string();
+
+    let src_json = serde_json::to_string(&script_src).unwrap_or_default();
+    let id_json = serde_json::to_string(site_id).unwrap_or_default();
+    let boot = format!(
+        "(function(){{try{{window.__TBC_RYBBIT__=1;var el=document.createElement(\"script\");el.src={src_json};el.defer=true;el.setAttribute(\"data-site-id\",{id_json});document.head.appendChild(el);}}catch(e){{}}}})();",
+        src_json = src_json,
+        id_json = id_json,
+    );
+
+    view! {
+        <script id="tbc-rybbit-boot" type="text/javascript">
+            {boot}
+        </script>
+    }
+}
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -94,6 +120,8 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <AutoReload options=options.clone() />
                 <HydrationScripts options/>
                 <MetaTags/>
+                {#[cfg(feature = "ssr")]
+                { rybbit_analytics_scripts() }}
             </head>
             <body>
                 <App/>

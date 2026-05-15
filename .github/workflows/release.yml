@@ -127,6 +127,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      attestations: write
     if: needs.build.result == 'success'
     steps:
       - name: Checkout repository
