@@ -1,5 +1,5 @@
 # Multi-stage build for production-ready Rust application with distroless runtime
-FROM rust:1.90-slim AS base
+FROM rust:1.91-slim AS base
 
 ARG BUILD_DATE
 ARG VCS_REF
