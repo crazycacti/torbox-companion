@@ -50,6 +50,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # Builder stage: Build application
 FROM base AS builder
+ARG TARGETARCH
+ARG ARM_CARGO_BUILD_JOBS=2
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY style ./style
@@ -59,13 +61,15 @@ ENV LEPTOS_OUTPUT_NAME=torbox-companion
 ENV LEPTOS_SITE_ADDR=0.0.0.0:3000
 ENV LEPTOS_ENV=PROD
 ENV RUST_BACKTRACE=1
+ENV BUILD_TARGETARCH=${TARGETARCH}
+ENV ARM_CARGO_BUILD_JOBS=${ARM_CARGO_BUILD_JOBS}
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/app/target \
-    sh -c 'if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "ARM64 detected, disabling wasm-opt optimization"; \
-        LEPTOS_WASM_OPT=false CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release; \
+    sh -c 'if [ "$BUILD_TARGETARCH" = "arm64" ]; then \
+        echo "ARM64: wasm-opt off, CARGO_BUILD_JOBS=${ARM_CARGO_BUILD_JOBS} (override with --build-arg ARM_CARGO_BUILD_JOBS=N)"; \
+        LEPTOS_WASM_OPT=false CARGO_BUILD_JOBS="${ARM_CARGO_BUILD_JOBS}" cargo leptos build --release; \
     else \
         echo "AMD64 detected, using wasm-opt optimization"; \
         CARGO_BUILD_JOBS=$(nproc) cargo leptos build --release; \
