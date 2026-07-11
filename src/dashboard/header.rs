@@ -167,6 +167,9 @@ pub fn DashboardHeader() -> impl IntoView {
                 if let Some(window) = web_sys::window() {
                     let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
                         if let Some(window) = web_sys::window() {
+                            if window.document().map(|d| d.hidden()).unwrap_or(false) {
+                                return;
+                            }
                             if let Ok(Some(storage)) = window.local_storage() {
                                 if let Ok(Some(api_key)) = storage.get_item("api_key") {
                                     if !api_key.is_empty() {
@@ -248,12 +251,12 @@ pub fn DashboardHeader() -> impl IntoView {
                     </div>
                 </div>
 
-                <nav class="hidden md:flex items-center space-x-1">
+                <nav class="hidden md:flex items-center space-x-1" role="tablist" aria-label="Dashboard sections">
                     <button 
-                        class={move || {
-                            let base = "px-4 py-2 text-sm font-medium rounded-lg transition-colors";
-                            base.to_string()
-                        }}
+                        role="tab"
+                        type="button"
+                        class="dashboard-tab px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+                        aria-selected=move || active_tab.get() == "overview"
                         style={move || {
                             if active_tab.get() == "overview" {
                                 "color: var(--text-primary); background-color: var(--bg-tertiary);"
@@ -266,10 +269,10 @@ pub fn DashboardHeader() -> impl IntoView {
                         "Overview"
                     </button>
                     <button 
-                        class={move || {
-                            let base = "px-4 py-2 text-sm font-medium rounded-lg transition-colors";
-                            base.to_string()
-                        }}
+                        role="tab"
+                        type="button"
+                        class="dashboard-tab px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+                        aria-selected=move || active_tab.get() == "automations"
                         style={move || {
                             if active_tab.get() == "automations" {
                                 "color: var(--text-primary); background-color: var(--bg-tertiary);"
@@ -282,10 +285,10 @@ pub fn DashboardHeader() -> impl IntoView {
                         "Automations"
                     </button>
                     <button 
-                        class={move || {
-                            let base = "px-4 py-2 text-sm font-medium rounded-lg transition-colors";
-                            base.to_string()
-                        }}
+                        role="tab"
+                        type="button"
+                        class="dashboard-tab px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+                        aria-selected=move || active_tab.get() == "themes"
                         style={move || {
                             if active_tab.get() == "themes" {
                                 "color: var(--text-primary); background-color: var(--bg-tertiary);"
@@ -298,10 +301,10 @@ pub fn DashboardHeader() -> impl IntoView {
                         "Themes"
                     </button>
                     <button 
-                        class={move || {
-                            let base = "px-4 py-2 text-sm font-medium rounded-lg transition-colors";
-                            base.to_string()
-                        }}
+                        role="tab"
+                        type="button"
+                        class="dashboard-tab px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+                        aria-selected=move || active_tab.get() == "user"
                         style={move || {
                             if active_tab.get() == "user" {
                                 "color: var(--text-primary); background-color: var(--bg-tertiary);"
@@ -334,21 +337,24 @@ pub fn DashboardHeader() -> impl IntoView {
                     </div>
 
                     <button
-                        class="hidden md:flex px-4 py-2 rounded-lg transition-colors items-center space-x-2"
-                        style="color: var(--text-secondary);"
+                        type="button"
+                        class="hidden md:flex toolbar-btn"
                         on:click=logout
+                        aria-label="Log out and clear API key"
+                        title="Log out"
                     >
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
                         </svg>
                         <span>"Logout"</span>
                     </button>
 
                     <button
-                        class="md:hidden p-2 rounded-lg transition-colors"
-                        style="color: var(--text-secondary);"
+                        type="button"
+                        class="icon-btn md:hidden"
                         on:click=toggle_mobile_menu
                         aria-label="Toggle menu"
+                        aria-expanded=move || mobile_menu_open.get()
                     >
                         <Show when=move || !mobile_menu_open.get()>
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

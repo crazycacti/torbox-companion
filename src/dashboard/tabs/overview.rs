@@ -11,12 +11,13 @@ pub fn OverviewTab() -> impl IntoView {
     
     view! {
         <div class="flex flex-col w-full mt-10 sm:mt-12">
-            <div class="mb-4 sm:mb-6" style="position: relative; z-index: 10; pointer-events: auto;">
-                <SearchComponent/>
-            </div>
-            
-            <div class="mb-4 sm:mb-6" style="position: relative; z-index: 8; pointer-events: auto;">
-                <UploadComponent/>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6 items-start">
+                <div style="position: relative; z-index: 10; pointer-events: auto;">
+                    <SearchComponent/>
+                </div>
+                <div style="position: relative; z-index: 8; pointer-events: auto;">
+                    <UploadComponent/>
+                </div>
             </div>
             
             <div class="mb-4 sm:mb-6" style="position: relative; z-index: 5;">

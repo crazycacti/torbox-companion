@@ -45,17 +45,15 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
                 
-                <meta name="description" content="An alternative to the default TorBox UI. Built with Rust because why not? Manage downloads, streaming, and more."/>
-                <meta name="keywords" content="torbox, torrent, download manager, usenet, streaming, rust, web app, p2p, file sharing, dark theme, api"/>
+                <meta name="description" content="Alternative TorBox UI for downloads, streaming, search, and automation rules."/>
+                <meta name="keywords" content="torbox, download manager, usenet, streaming, rust, web app"/>
                 <meta name="author" content="Torbox Companion"/>
                 <meta name="robots" content="index, follow"/>
                 <meta name="language" content="en"/>
-                <meta name="revisit-after" content="7 days"/>
                 
                 <meta property="og:title" content="Torbox Companion"/>
-                <meta property="og:description" content="An alternative to the default TorBox UI. Built with Rust because why not? Manage downloads, streaming, and more."/>
+                <meta property="og:description" content="Alternative TorBox UI for downloads, streaming, search, and automation rules."/>
                 <meta property="og:type" content="website"/>
-                <meta property="og:url" content="https://torbox-companion.app"/>
                 <meta property="og:image" content="/favicon-192x192.png"/>
                 <meta property="og:image:width" content="192"/>
                 <meta property="og:image:height" content="192"/>
@@ -64,7 +62,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 
                 <meta name="twitter:card" content="summary"/>
                 <meta name="twitter:title" content="Torbox Companion"/>
-                <meta name="twitter:description" content="An alternative to the default TorBox UI. Built with Rust because why not? Manage downloads, streaming, and more."/>
+                <meta name="twitter:description" content="Alternative TorBox UI for downloads, streaming, search, and automation rules."/>
                 <meta name="twitter:image" content="/favicon-192x192.png"/>
                 
                 <meta name="theme-color" content="#1e293b"/>
@@ -86,16 +84,13 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"/>
                 <link rel="manifest" href="/site.webmanifest"/>
                 
-                <link rel="canonical" href="https://torbox-companion.app"/>
-                
                 <script type="application/ld+json">
                 {r#"
                 {
                     "@context": "https://schema.org",
                     "@type": "WebApplication",
                     "name": "Torbox Companion",
-                    "description": "An alternative to the default TorBox UI. Built with Rust because why not? Manage downloads, streaming, and more.",
-                    "url": "https://torbox-companion.app",
+                    "description": "Alternative TorBox UI for downloads, streaming, search, and automation rules.",
                     "applicationCategory": "UtilityApplication",
                     "operatingSystem": "Web Browser",
                     "offers": {
@@ -107,13 +102,10 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                         "@type": "Organization",
                         "name": "Torbox Companion"
                     },
-                    "datePublished": "2024-10-25",
-                    "dateModified": "2024-10-25",
                     "inLanguage": "en",
                     "isAccessibleForFree": true,
                     "browserRequirements": "Requires JavaScript. Requires HTML5.",
-                    "softwareVersion": "1.0.0",
-                    "screenshot": "https://torbox-companion.app/favicon-192x192.png"
+                    "softwareVersion": "0.1.0"
                 }
                 "#}
                 </script>

@@ -1,8 +1,8 @@
 {
-    "name": "Torbox Companion - Modern TorBox UI",
+    "name": "Torbox Companion",
     "short_name": "Torbox",
-    "description": "An alternative to the default TorBox UI. Built with Rust because why not? Manage downloads, streaming, and more.",
-    "categories": ["productivity", "utilities", "developer"],
+    "description": "Alternative TorBox UI for downloads, streaming, search, and automation rules.",
+    "categories": ["productivity", "utilities"],
     "lang": "en",
     "icons": [
         {

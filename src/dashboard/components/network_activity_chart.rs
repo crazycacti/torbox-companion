@@ -47,6 +47,7 @@ pub fn NetworkActivityChart() -> impl IntoView {
     
     let data_points = RwSignal::new(VecDeque::<DataPoint>::new());
     let is_collapsed = RwSignal::new(true);
+    let user_force_collapsed = RwSignal::new(false);
     let hovered_point = RwSignal::new(None::<(f64, f64, i64, i64)>);
     
     let has_activity = Memo::new(move |_| {
@@ -56,10 +57,16 @@ pub fn NetworkActivityChart() -> impl IntoView {
     
     Effect::new(move |_| {
         let activity = has_activity.get();
-        if activity {
-            is_collapsed.set(false);
-        } else {
+        if !activity {
+            // Clear sticky collapse when idle so the next transfer can auto-expand.
+            user_force_collapsed.set(false);
             is_collapsed.set(true);
+            return;
+        }
+        if user_force_collapsed.get() {
+            is_collapsed.set(true);
+        } else {
+            is_collapsed.set(false);
         }
     });
     
@@ -135,7 +142,9 @@ pub fn NetworkActivityChart() -> impl IntoView {
     });
     
     let toggle_collapse = move |_| {
-        is_collapsed.update(|c| *c = !*c);
+        let next_collapsed = !is_collapsed.get();
+        is_collapsed.set(next_collapsed);
+        user_force_collapsed.set(next_collapsed);
         #[cfg(target_arch = "wasm32")]
         {
                 let canvas_ref_clone = canvas_ref.clone();
@@ -182,32 +191,38 @@ pub fn NetworkActivityChart() -> impl IntoView {
     view! {
         <div class="mt-4 mb-4 rounded-xl border" 
              style="border-color: var(--border-secondary); background-color: var(--bg-card); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);">
-            <div class="px-4 py-4">
-                <div class="flex items-center justify-between gap-4 cursor-pointer" on:click=toggle_collapse style="user-select: none;">
-                    <div class="flex items-center gap-4 flex-1" style="pointer-events: none;">
+            <div class="px-2 sm:px-4 py-2">
+                <button
+                    type="button"
+                    class="w-full flex items-center justify-between gap-4 px-2 rounded-lg transition-colors chart-toggle"
+                    on:click=toggle_collapse
+                    aria-expanded=move || !is_collapsed.get()
+                    aria-label="Toggle network activity chart"
+                >
+                    <div class="flex items-center gap-4 flex-1 min-w-0">
                         <h3 class="text-base lg:text-lg font-semibold" style="color: var(--text-primary);">
                             "Network Activity"
                         </h3>
                         
-                        <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-4 flex-wrap">
                             <div class="flex items-center gap-2">
-                                <div class="w-2.5 h-2.5 rounded-full" style="background-color: #34D399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.4);"></div>
+                                <div class="w-2.5 h-2.5 rounded-full" style="background-color: #34D399;"></div>
                                 <span class="text-sm font-medium" style="color: #34D399;">
                                     {move || format!("↓ {}", format_speed(current_speeds.get().0))}
                                 </span>
                             </div>
                             <div class="flex items-center gap-2">
-                                <div class="w-2.5 h-2.5 rounded-full" style="background-color: #F87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.4);"></div>
+                                <div class="w-2.5 h-2.5 rounded-full" style="background-color: #F87171;"></div>
                                 <span class="text-sm font-medium" style="color: #F87171;">
                                     {move || format!("↑ {}", format_speed(current_speeds.get().1))}
                                 </span>
                             </div>
                         </div>
                     </div>
-                    <div class="text-lg" style="color: var(--text-secondary); pointer-events: none;">
+                    <span class="icon-btn" style="pointer-events: none;" aria-hidden="true">
                         {move || if is_collapsed.get() { "▼" } else { "▲" }}
-                    </div>
-                </div>
+                    </span>
+                </button>
             </div>
             
             <Show when=move || !is_collapsed.get()>

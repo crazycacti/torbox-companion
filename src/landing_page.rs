@@ -7,6 +7,7 @@ use wasm_bindgen;
 use crate::api::{RequestHandler, ApiError};
 use crate::notifications::use_notification;
 
+
 #[component]
 pub fn LandingPage() -> impl IntoView {
     let api_key = RwSignal::new(String::new());
@@ -39,26 +40,24 @@ pub fn LandingPage() -> impl IntoView {
     let notifications_clone = notifications.clone();
     let is_connecting_clone = is_connecting.clone();
     let error_message_clone = error_message.clone();
-    let connect_to_api = move |_| {
+    let connect_to_api = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
         let key = api_key.get().trim().to_string();
         let notifications_for_check = notifications_clone.clone();
         let error_message_for_check = error_message_clone.clone();
         
         if key.is_empty() {
-            error_message_for_check.set("Invalid Key".to_string());
-            notifications_for_check.error("Please enter your API key".to_string());
+            error_message_for_check.set("Enter your API key".to_string());
             return;
         }
         
         if key.len() < 10 || key.len() > 500 {
-            error_message_for_check.set("Invalid Key".to_string());
-            notifications_for_check.error("API key length is invalid".to_string());
+            error_message_for_check.set("API key length is invalid".to_string());
             return;
         }
         
         if !key.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-            error_message_for_check.set("Invalid Key".to_string());
-            notifications_for_check.error("API key contains invalid characters".to_string());
+            error_message_for_check.set("API key contains invalid characters".to_string());
             return;
         }
 
@@ -87,23 +86,23 @@ pub fn LandingPage() -> impl IntoView {
                             window.location().set_href("/dashboard");
                         } else {
                             is_connecting_local.set(false);
-                            error_message_local.set("Invalid Key".to_string());
+                            error_message_local.set("Could not open dashboard".to_string());
                             notifications_local.error("Failed to access window".to_string());
                         }
                     }
                     Ok(false) => {
                         is_connecting_local.set(false);
-                        error_message_local.set("Invalid Key".to_string());
+                        error_message_local.set("Invalid API key".to_string());
                         notifications_local.error("Invalid API key. Please check your key and try again.".to_string());
                     }
                     Err(e) => {
                         is_connecting_local.set(false);
-                        error_message_local.set("Invalid Key".to_string());
                         let error_msg = match e {
-                            ApiError::NetworkError => "Network error. Please check your connection and try again.".to_string(),
-                            ApiError::ServerError => "Server error. Please try again later.".to_string(),
+                            ApiError::NetworkError => "Network error. Check your connection and try again.".to_string(),
+                            ApiError::ServerError => "Server error. Try again later.".to_string(),
                             _ => format!("Failed to validate API key: {}", e),
                         };
+                        error_message_local.set(error_msg.clone());
                         notifications_local.error(error_msg);
                     }
                 }
@@ -124,8 +123,8 @@ pub fn LandingPage() -> impl IntoView {
                         <img src="/tclogo.png" alt="Torbox Companion Logo" class="w-6 h-6 sm:w-8 sm:h-8 object-contain"/>
                         <h1 class="text-2xl sm:text-3xl md:text-4xl font-bold text-white">"Torbox Companion"</h1>
                     </div>
-                    <p class="text-slate-300 text-base sm:text-lg">"The power user's alternative for TorBox management"</p>
-                    <p class="text-slate-400 text-xs sm:text-sm mt-2">"Built with Rust because why not?"</p>
+                    <p class="text-slate-300 text-base sm:text-lg">"Manage TorBox downloads, streaming, and automation"</p>
+                    <p class="text-slate-400 text-xs sm:text-sm mt-2">"Open-source companion UI built with Rust"</p>
                 </div>
 
                 <div class="bg-slate-800/50 border rounded-xl p-4 sm:p-6 md:p-8 shadow-2xl animate-slide-up">
@@ -133,66 +132,62 @@ pub fn LandingPage() -> impl IntoView {
                     <p class="text-slate-300 text-sm sm:text-base mb-4 sm:mb-6">"Enter your API key to begin managing your connections"</p>
                     
                     <Show when=move || !error_message.get().is_empty()>
-                        <div class="mb-4 text-center">
+                        <div class="mb-4 text-center" role="alert" aria-live="assertive">
                             <p class="font-bold text-lg" style="color: var(--error) !important; animation: fadeIn 0.3s ease-out;">
                                 {move || error_message.get()}
                             </p>
                         </div>
                     </Show>
                     
-                    <div class="mb-6">
-                        <label class="block text-sm font-medium text-slate-300 mb-2">
-                            "API Key"
-                        </label>
-                        <div class="password-container">
-                            <input
-                                type=move || if show_key.get() { "text" } else { "password" }
-                                placeholder="Enter your API key"
-                                class="password-input"
-                                prop:value=move || api_key.get()
-                                on:input=move |ev| api_key.set(event_target_value(&ev))
-                                autocomplete="off"
-                                spellcheck="false"
-                            />
-                            <button
-                                type="button"
-                                class="toggle-button"
-                                on:click=toggle_visibility
-                                aria-label=move || if show_key.get() { "Hide API key" } else { "Show API key" }
-                            >
-                                {move || if show_key.get() { 
-                                    view! {
-                                        <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                            <circle cx="12" cy="12" r="3"/>
-                                        </svg>
-                                    }
-                                } else { 
-                                    view! {
-                                        <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                                            <line x1="1" y1="1" x2="23" y2="23"/>
-                                        </svg>
-                                    }
-                                }}
-                            </button>
+                    <form on:submit=connect_to_api>
+                        <div class="mb-6">
+                            <label class="block text-sm font-medium text-slate-300 mb-2" for="api-key-input">
+                                "API Key"
+                            </label>
+                            <div class="password-container">
+                                <input
+                                    id="api-key-input"
+                                    type=move || if show_key.get() { "text" } else { "password" }
+                                    placeholder="Enter your API key"
+                                    class="password-input"
+                                    prop:value=move || api_key.get()
+                                    on:input=move |ev| api_key.set(event_target_value(&ev))
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                />
+                                <button
+                                    type="button"
+                                    class="toggle-button"
+                                    on:click=toggle_visibility
+                                    aria-label=move || if show_key.get() { "Hide API key" } else { "Show API key" }
+                                >
+                                    {move || if show_key.get() { 
+                                        view! {
+                                            <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                <circle cx="12" cy="12" r="3"/>
+                                            </svg>
+                                        }
+                                    } else { 
+                                        view! {
+                                            <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                                                <line x1="1" y1="1" x2="23" y2="23"/>
+                                            </svg>
+                                        }
+                                    }}
+                                </button>
+                            </div>
                         </div>
-                    </div>
 
-                    <button
-                        class=move || {
-                            let base = "w-full font-medium py-2.5 sm:py-3 px-4 rounded-lg mb-6 sm:mb-8 text-sm sm:text-base";
-                            if is_connecting.get() || api_key.get().is_empty() {
-                                format!("{} bg-gray-500 text-gray-300 cursor-not-allowed", base)
-                            } else {
-                                format!("{} bg-blue-600 text-white hover:bg-blue-700 cursor-pointer", base)
-                            }
-                        }
-                        disabled=move || is_connecting.get() || api_key.get().is_empty()
-                        on:click=connect_to_api
-                    >
-                        {move || if is_connecting.get() { "Connecting..." } else { "Connect to API" }}
-                    </button>
+                        <button
+                            type="submit"
+                            class="w-full font-medium py-2.5 sm:py-3 px-4 rounded-lg mb-6 sm:mb-8 text-sm sm:text-base bg-blue-600 text-white cursor-pointer"
+                            disabled=move || is_connecting.get() || api_key.get().is_empty()
+                        >
+                            {move || if is_connecting.get() { "Connecting..." } else { "Connect to API" }}
+                        </button>
+                    </form>
 
                     <div class="text-center">
                         <p class="text-slate-400 text-sm mb-3">
@@ -205,9 +200,9 @@ pub fn LandingPage() -> impl IntoView {
                     </div>
                 </div>
 
-                <div class="mt-20 text-center text-slate-400 text-sm">
-                    <div class="border-t border-slate-700/30 pt-8">
-                        <p class="mb-4">
+                <div class="mt-10 text-center text-slate-400 text-sm">
+                    <div class="border-t border-slate-700/30 pt-6">
+                        <p class="mb-3">
                             "Need a TorBox account? "
                             <a 
                                 href="https://torbox.app/subscription?referral=09c3f0f3-4e61-4634-a6dc-40af39f8165c" 
@@ -217,18 +212,14 @@ pub fn LandingPage() -> impl IntoView {
                             >
                                 "Sign up here"
                             </a>
-                            " to get started!"
                         </p>
-                        
-                        <p class="mb-4">
-                            "We don't store any of your information. This app is fully open source. "
-                            <a href="https://github.com/crazycacti/torbox-companion" class="text-blue-400 hover:text-blue-300 transition-colors" target="_blank" rel="noopener noreferrer">"View on GitHub"</a>
-                        </p>
-                        
-                        <p>
-                            "This is a complete rewrite of "
-                            <a href="https://github.com/jittarao/torbox-app" class="text-blue-400 hover:text-blue-300 transition-colors" target="_blank" rel="noopener noreferrer">"Torbox Manager"</a>
-                            " "
+                        <p class="flex items-center justify-center gap-3">
+                            <a href="https://github.com/crazycacti/torbox-companion" class="text-blue-400 hover:text-blue-300 transition-colors" target="_blank" rel="noopener noreferrer">"GitHub"</a>
+                            <span class="text-slate-600" aria-hidden="true">"|"</span>
+                            <span>
+                                "Rewrite of "
+                                <a href="https://github.com/jittarao/torbox-app" class="text-blue-400 hover:text-blue-300 transition-colors" target="_blank" rel="noopener noreferrer">"Torbox Manager"</a>
+                            </span>
                         </p>
                     </div>
                 </div>
@@ -236,4 +227,3 @@ pub fn LandingPage() -> impl IntoView {
         </div>
     }
 }
-

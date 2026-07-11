@@ -4,17 +4,16 @@ use crate::automation::engine::ExecutionResult;
 use crate::automation::scheduler::AutomationScheduler;
 use crate::automation::types::*;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query},
     http::{HeaderMap, StatusCode},
     response::Json,
-    routing::{get, post, put, delete},
+    routing::{get, post},
     Router,
 };
 use leptos::logging::log;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio_cron_scheduler::Job;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -37,7 +36,7 @@ pub struct RuleLimitInfo {
     pub max_rules: i64,
 }
 
-fn extract_api_key(headers: &HeaderMap, query: &HashMap<String, String>) -> Option<String> {
+fn extract_api_key(headers: &HeaderMap) -> Option<String> {
     if let Some(auth_header) = headers.get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if auth_str.starts_with("Bearer ") {
@@ -52,7 +51,7 @@ fn extract_api_key(headers: &HeaderMap, query: &HashMap<String, String>) -> Opti
         }
     }
 
-    query.get("api_key").cloned()
+    None
 }
 
 async fn get_api_key_hash(api_key: &str) -> String {
@@ -129,34 +128,34 @@ pub fn create_routes(
     Router::new()
         .route("/api/automation/rules", get({
             let state = state.clone();
-            move |headers: HeaderMap, query: Query<HashMap<String, String>>| {
+            move |headers: HeaderMap| {
                 let state = state.clone();
-                async move { get_rules(headers, query, state).await }
+                async move { get_rules(headers, state).await }
             }
         }).post({
             let state = state.clone();
-            move |headers: HeaderMap, query: Query<HashMap<String, String>>, payload: Json<CreateRuleRequest>| {
+            move |headers: HeaderMap, payload: Json<CreateRuleRequest>| {
                 let state = state.clone();
-                async move { create_rule(headers, query, state, payload).await }
+                async move { create_rule(headers, state, payload).await }
             }
         }))
         .route("/api/automation/rules/{id}", get({
             let state = state.clone();
-            move |id: Path<i64>, headers: HeaderMap, query: Query<HashMap<String, String>>| {
+            move |id: Path<i64>, headers: HeaderMap| {
                 let state = state.clone();
-                async move { get_rule(id, headers, query, state).await }
+                async move { get_rule(id, headers, state).await }
             }
         }).put({
             let state = state.clone();
-            move |id: Path<i64>, headers: HeaderMap, query: Query<HashMap<String, String>>, payload: Json<CreateRuleRequest>| {
+            move |id: Path<i64>, headers: HeaderMap, payload: Json<CreateRuleRequest>| {
                 let state = state.clone();
-                async move { update_rule(id, headers, query, state, payload).await }
+                async move { update_rule(id, headers, state, payload).await }
             }
         }).delete({
             let state = state.clone();
-            move |id: Path<i64>, headers: HeaderMap, query: Query<HashMap<String, String>>| {
+            move |id: Path<i64>, headers: HeaderMap| {
                 let state = state.clone();
-                async move { delete_rule(id, headers, query, state).await }
+                async move { delete_rule(id, headers, state).await }
             }
         }))
         .route("/api/automation/rules/{id}/logs", get({
@@ -168,30 +167,30 @@ pub fn create_routes(
         }))
         .route("/api/automation/rules/{id}/next-run", get({
             let state = state.clone();
-            move |id: Path<i64>, headers: HeaderMap, query: Query<HashMap<String, String>>| {
+            move |id: Path<i64>, headers: HeaderMap| {
                 let state = state.clone();
-                async move { get_next_run_time(id, headers, query, state).await }
+                async move { get_next_run_time(id, headers, state).await }
             }
         }))
         .route("/api/automation/rules/{id}/run", post({
             let state = state.clone();
-            move |id: Path<i64>, headers: HeaderMap, query: Query<HashMap<String, String>>| {
+            move |id: Path<i64>, headers: HeaderMap| {
                 let state = state.clone();
-                async move { force_run_rule(id, headers, query, state).await }
+                async move { force_run_rule(id, headers, state).await }
             }
         }))
         .route("/api/automation/rules/bulk-delete", post({
             let state = state.clone();
-            move |headers: HeaderMap, query: Query<HashMap<String, String>>, payload: Json<serde_json::Value>| {
+            move |headers: HeaderMap, payload: Json<serde_json::Value>| {
                 let state = state.clone();
-                async move { bulk_delete_rules(headers, query, state, payload).await }
+                async move { bulk_delete_rules(headers, state, payload).await }
             }
         }))
         .route("/api/automation/rules/limit", get({
             let state = state.clone();
-            move |headers: HeaderMap, query: Query<HashMap<String, String>>| {
+            move |headers: HeaderMap| {
                 let state = state.clone();
-                async move { get_rule_limit(headers, query, state).await }
+                async move { get_rule_limit(headers, state).await }
             }
         }))
         .route("/api/automation/health", get({
@@ -205,10 +204,9 @@ pub fn create_routes(
 
 async fn get_rules(
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
 ) -> Result<Json<ApiResponse<Vec<AutomationRule>>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;
@@ -229,10 +227,9 @@ async fn get_rules(
 async fn get_rule(
     id: Path<i64>,
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
 ) -> Result<Json<ApiResponse<AutomationRule>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;
@@ -262,11 +259,10 @@ struct CreateRuleRequest {
 
 async fn create_rule(
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
     payload: Json<CreateRuleRequest>,
 ) -> Result<Json<ApiResponse<AutomationRule>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     if let Err(e) = validate_rule(&payload) {
@@ -345,11 +341,10 @@ async fn create_rule(
 async fn update_rule(
     id: Path<i64>,
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
     payload: Json<CreateRuleRequest>,
 ) -> Result<Json<ApiResponse<AutomationRule>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     if let Err(e) = validate_rule(&payload) {
@@ -413,10 +408,9 @@ async fn update_rule(
 async fn delete_rule(
     id: Path<i64>,
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
 ) -> Result<Json<ApiResponse<()>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;
@@ -449,7 +443,7 @@ async fn get_rule_logs(
     query: Query<HashMap<String, String>>,
     state: AppState,
 ) -> Result<Json<ApiResponse<Vec<ExecutionLog>>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;
@@ -474,10 +468,9 @@ async fn get_rule_logs(
 async fn get_next_run_time(
     id: Path<i64>,
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
 ) -> Result<Json<ApiResponse<Option<String>>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;
@@ -521,10 +514,9 @@ async fn get_next_run_time(
 async fn force_run_rule(
     id: Path<i64>,
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
 ) -> Result<Json<ApiResponse<ExecutionResult>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;
@@ -593,11 +585,10 @@ struct BulkDeleteRequest {
 
 async fn bulk_delete_rules(
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
     payload: Json<serde_json::Value>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;
@@ -671,10 +662,9 @@ async fn bulk_delete_rules(
 
 async fn get_rule_limit(
     headers: HeaderMap,
-    query: Query<HashMap<String, String>>,
     state: AppState,
 ) -> Result<Json<ApiResponse<RuleLimitInfo>>, StatusCode> {
-    let api_key = extract_api_key(&headers, &query)
+    let api_key = extract_api_key(&headers)
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let api_key_hash = get_api_key_hash(&api_key).await;

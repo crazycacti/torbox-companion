@@ -11,3 +11,8 @@ services:
       - TORBOX_MAX_RULES_PER_USER=100
       - TORBOX_LOG_RETENTION_DAYS=90
       - TORBOX_RULE_EXECUTION_TIMEOUT_SECS=130
+      - TORBOX_PROXY_RATE_LIMIT=300
+      # Required when a public CDN/proxy (for example Cloudflare) sets X-Forwarded-For:
+      # - TORBOX_TRUST_PROXY=1
+      # Optional: set SITE_URL to your own public origin for absolute SEO tags.
+      # - SITE_URL=https://example.com

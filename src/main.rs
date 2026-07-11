@@ -127,7 +127,10 @@ async fn main() {
         log!("Shutting down server...");
     };
 
-    axum::serve(listener, app.into_make_service())
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
         .with_graceful_shutdown(shutdown)
         .await
         .unwrap();

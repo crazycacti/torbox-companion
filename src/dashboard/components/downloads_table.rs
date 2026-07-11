@@ -1378,6 +1378,37 @@ pub fn DownloadsTable(
             let _ = JsFuture::from(promise).await;
             
             loop {
+                let document_hidden = web_sys::window()
+                    .and_then(|w| w.document())
+                    .map(|d| d.hidden())
+                    .unwrap_or(false);
+
+                if document_hidden {
+                    loop {
+                        let promise = Promise::new(&mut |resolve, _| {
+                            if let Some(window) = web_sys::window() {
+                                let closure = wasm_bindgen::closure::Closure::once(move || {
+                                    resolve.call0(&wasm_bindgen::JsValue::UNDEFINED).ok();
+                                });
+                                let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                    closure.as_ref().unchecked_ref(),
+                                    1_000,
+                                );
+                                closure.forget();
+                            }
+                        });
+                        let _ = JsFuture::from(promise).await;
+                        let still_hidden = web_sys::window()
+                            .and_then(|w| w.document())
+                            .map(|d| d.hidden())
+                            .unwrap_or(false);
+                        if !still_hidden {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
                         if let Ok(Some(api_key)) = storage.get_item("api_key") {
@@ -3378,11 +3409,10 @@ pub fn DownloadsTable(
 
     view! {
         <div class="w-full">
-            <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mb-6">
-                <div class="flex-shrink-0 lg:w-auto lg:min-w-0">
-                    <div class="p-4">
-                        <div class="space-y-3">
-                            <div class="flex justify-center items-center text-sm" style="gap: 8px;">
+            <div class="downloads-toolbar mb-6 flex flex-col xl:flex-row xl:items-center gap-3 xl:gap-4 py-3 border-b" style="border-color: var(--border-secondary);">
+                <div class="flex-shrink-0">
+                    <div class="space-y-2">
+                            <div class="flex items-center text-sm" style="gap: 8px;">
                                 <span style="color: var(--text-secondary);">"Total:"</span>
                                 <span class="font-medium" style="color: var(--text-primary);">{move || *get_download_counts().get("total").unwrap_or(&0)}</span>
                             </div>
@@ -3471,12 +3501,12 @@ pub fn DownloadsTable(
                                 }
                             </div>
                         </div>
-                    </div>
                 </div>
                 
+                <div class="hidden xl:block self-stretch w-px flex-shrink-0" style="background-color: var(--border-secondary);" aria-hidden="true"></div>
+                
                 <div class="flex-1 min-w-0">
-                    <div class="p-4">
-                        <div class="flex flex-col gap-3">
+                        <div class="flex flex-col gap-2">
                             <div class="flex flex-col gap-2">
                                 <label class="block text-xs sm:text-sm font-medium" style="color: var(--text-secondary);">"Status"</label>
                                 <div class="flex flex-wrap gap-1.5 sm:gap-2 md:gap-3">
@@ -3485,7 +3515,7 @@ pub fn DownloadsTable(
                                         let get_download_counts_clone = get_download_counts.clone();
                                         view! {
                                             <button
-                                                class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_clone.get() == "all" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                class={move || format!("filter-chip {}", if status_filter_clone.get() == "all" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                 style={move || {
                                                     if status_filter_clone.get() == "all" {
                                                         "background-color: rgba(156, 163, 175, 0.2); color: #9ca3af; border: 1.5px solid rgba(156, 163, 175, 0.4);".to_string()
@@ -3505,7 +3535,7 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || queued_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_queued.get() == "queued" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("filter-chip {}", if status_filter_queued.get() == "queued" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_queued.get() == "queued" {
                                                                     "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
@@ -3534,7 +3564,7 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || downloading_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_downloading.get() == "downloading" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("filter-chip {}", if status_filter_downloading.get() == "downloading" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_downloading.get() == "downloading" {
                                                                     "background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1.5px solid rgba(59, 130, 246, 0.4);".to_string()
@@ -3563,7 +3593,7 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || seeding_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_seeding.get() == "seeding" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("filter-chip {}", if status_filter_seeding.get() == "seeding" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_seeding.get() == "seeding" {
                                                                     "background-color: rgba(96, 165, 250, 0.2); color: #60a5fa; border: 1.5px solid rgba(96, 165, 250, 0.4);".to_string()
@@ -3592,7 +3622,7 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || cached_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_cached.get() == "cached" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("filter-chip {}", if status_filter_cached.get() == "cached" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_cached.get() == "cached" {
                                                                     "background-color: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1.5px solid rgba(34, 197, 94, 0.4);".to_string()
@@ -3621,7 +3651,7 @@ pub fn DownloadsTable(
                                                 view! {
                                                     <Show when=move || inactive_count() != 0>
                                                         <button
-                                                            class={move || format!("px-2.5 sm:px-3 md:px-3.5 py-1.5 sm:py-0.5 md:py-1 rounded-full text-xs font-medium transition-all cursor-pointer min-h-[36px] sm:min-h-0 {}", if status_filter_inactive.get() == "inactive" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
+                                                            class={move || format!("filter-chip {}", if status_filter_inactive.get() == "inactive" { "opacity-100" } else { "opacity-70 hover:opacity-100" })}
                                                             style={move || {
                                                                 if status_filter_inactive.get() == "inactive" {
                                                                     "background-color: rgba(248, 113, 113, 0.2); color: #f87171; border: 1.5px solid rgba(248, 113, 113, 0.4);".to_string()
@@ -3647,15 +3677,14 @@ pub fn DownloadsTable(
                                 </div>
                             </div>
                         </div>
-                    </div>
                 </div>
                 
-                <div class="flex-shrink-0 lg:w-auto lg:min-w-0">
-                    <div class="p-4">
-                        <div class="flex items-center justify-center space-x-2">
+                <div class="hidden xl:block self-stretch w-px flex-shrink-0" style="background-color: var(--border-secondary);" aria-hidden="true"></div>
+                
+                <div class="flex-shrink-0">
+                        <div class="flex items-center justify-start xl:justify-center flex-wrap gap-2">
                             <button
-                                class="px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
-                                style="background-color: transparent; border: 1px solid var(--border-secondary);"
+                                class="toolbar-btn"
                                 on:click=move |_| is_blurred.set(!is_blurred.get())
                                 title="Toggle Blur Sensitive Data"
                             >
@@ -3688,8 +3717,7 @@ pub fn DownloadsTable(
                                 };
                                 view! {
                                     <button
-                                        class="px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
-                                        style="background-color: transparent; border: 1px solid var(--border-secondary);"
+                                        class="toolbar-btn"
                                         disabled=move || !has_files()
                                         on:click=move |_| toggle_expand_all_files()
                                         title={move || if all_files_expanded() { "Collapse All Files" } else { "Expand All Files" }}
@@ -3708,20 +3736,7 @@ pub fn DownloadsTable(
                                     </button>
                                 }
                             }
-                            
-                            <button
-                                class="px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 text-sm font-medium whitespace-nowrap"
-                                style="background-color: transparent; border: 1px solid var(--border-secondary);"
-                                title="Configure Settings"
-                            >
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--accent-primary);">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                </svg>
-                                <span style="color: var(--text-primary);">"Config"</span>
-                            </button>
                         </div>
-                    </div>
                 </div>
             </div>
 
@@ -3858,10 +3873,11 @@ pub fn DownloadsTable(
                                     <th class="px-4 py-4 text-center text-sm font-semibold uppercase tracking-wide border-r" style="width: 50px; color: var(--text-primary); border-color: var(--border-secondary);">
                                         <input
                                             type="checkbox"
-                                            class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                                            class="table-checkbox"
                                             checked=move || is_all_selected()
                                             class:opacity-50=move || is_partially_selected()
                                             on:change=move |_| toggle_select_all()
+                                            aria-label="Select all downloads"
                                         />
                                     </th>
                                     <th class="px-4 py-4 text-center text-sm font-bold uppercase tracking-wide border-r" style="width: 350px; max-width: 350px; color: var(--text-primary); border-color: var(--border-secondary);">
@@ -4033,16 +4049,17 @@ pub fn DownloadsTable(
                                                     <td class="px-4 py-4 text-center" style="width: 50px;">
                                                         <input
                                                             type="checkbox"
-                                                            class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                                                            class="table-checkbox"
                                                             checked=move || selection_state.with(|s| s.is_item_selected(download.id))
                                                             on:change=move |_| toggle_item_selection(download.id)
+                                                            aria-label="Select download"
                                                         />
                                                     </td>
                                                     <td class="px-4 py-4 overflow-hidden" style="width: 350px; max-width: 350px;">
                                                         <div class="flex items-center space-x-2">
                                                             <Show when=move || files_empty_check>
                                                                 <button
-                                                                    class="text-slate-400 hover:text-white transition-colors flex-shrink-0"
+                                                                    class="icon-btn flex-shrink-0"
                                                                     on:click=move |_| toggle_file_expansion(download.id)
                                                                     title="Show/Hide Files"
                                                                 >
@@ -4269,7 +4286,7 @@ pub fn DownloadsTable(
                                                                 let action_loading_clone = action_loading.clone();
                                                                 view! {
                                                                     <button
-                                                                        class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_download_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
+                                                                        class={move || format!("icon-btn {}", if is_download_enabled(&status_class) { "" } else { "is-disabled" })}
                                                                         style={move || if is_download_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
                                                                         disabled=move || !is_download_enabled(&status_disabled) || action_loading_clone.get().get(&download_button_clone.id) == Some(&"download".to_string())
                                                                         on:click={
@@ -4306,7 +4323,7 @@ pub fn DownloadsTable(
                                                                 let action_loading_clone = action_loading.clone();
                                                                 view! {
                                                                     <button
-                                                                        class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_pause_resume_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
+                                                                        class={move || format!("icon-btn {}", if is_pause_resume_enabled(&status_class) { "" } else { "is-disabled" })}
                                                                         style={move || if is_pause_resume_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
                                                                         disabled=move || !is_pause_resume_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"stop_resume".to_string())
                                                                         on:click=move |_| if is_pause_resume_enabled(&status_click) && action_loading_clone.get().get(&download_id) != Some(&"stop_resume".to_string()) { handle_stop_resume_for_row(pause_resume_clone.id, pause_resume_clone.download_type.clone(), pause_resume_clone.status.clone()) }
@@ -4355,7 +4372,7 @@ pub fn DownloadsTable(
                                                                 let confirmation_state_for_delete = confirmation_state_clone_for_row.clone();
                                                                 view! {
                                                                         <button
-                                                                            class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_delete_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
+                                                                            class={move || format!("icon-btn {}", if is_delete_enabled(&status_class) { "" } else { "is-disabled" })}
                                                                             style={move || if is_delete_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
                                                                             disabled=move || !is_delete_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"delete".to_string())
                                                                             on:click=move |_| {
@@ -4536,7 +4553,7 @@ pub fn DownloadsTable(
                                                                 view! {
                                                                     <Show when=move || is_reannounce_enabled(&reannounce_status, reannounce_type)>
                                                                         <button
-                                                                            class="p-2 rounded transition-colors flex items-center justify-center"
+                                                                            class="icon-btn"
                                                                             style="background-color: transparent;"
                                                                             on:click={
                                                                                 let handle_reannounce_local = handle_reannounce_for_row.clone();
@@ -4563,7 +4580,7 @@ pub fn DownloadsTable(
                                                                 let action_loading_clone = action_loading.clone();
                                                                 view! {
                                                                     <button
-                                                                        class={move || format!("p-2 rounded transition-colors flex items-center justify-center {}", if is_stream_enabled(&status_class) { "" } else { "cursor-not-allowed opacity-50" })}
+                                                                        class={move || format!("icon-btn {}", if is_stream_enabled(&status_class) { "" } else { "is-disabled" })}
                                                                         style={move || if is_stream_enabled(&status_style) { "background-color: transparent;" } else { "background-color: transparent; opacity: 0.5;" }}
                                                                         disabled=move || !is_stream_enabled(&status_disabled) || action_loading_clone.get().get(&download_id) == Some(&"stream".to_string())
                                                                         on:click={
@@ -4599,7 +4616,7 @@ pub fn DownloadsTable(
                                                             
                                                             <div class="relative inline-block text-left" on:click=|ev| ev.stop_propagation()>
                                                                 <button
-                                                                    class="p-2 rounded transition-colors flex items-center justify-center"
+                                                                    class="icon-btn"
                                                                     style="background-color: transparent;"
                                                                     title="More options"
                                                                     on:click=move |_| toggle_dropdown(download.id)
@@ -4858,7 +4875,7 @@ pub fn DownloadsTable(
                                                                                                         </svg>
                                                                                                     </button>
                                                                                                     <button
-                                                                                                        class="p-2 rounded transition-colors flex items-center justify-center"
+                                                                                                        class="icon-btn"
                                                                                                         style="background-color: transparent;"
                                                                                                         on:click={
                                                                                                             let handle_copy_link_local = handle_copy_link_for_file.clone();
@@ -4884,7 +4901,7 @@ pub fn DownloadsTable(
                                                                                                                 is_video_file(&file_check_clone) && !file_check_clone.zipped.unwrap_or(false) && !file_check_clone.infected.unwrap_or(false)
                                                                                                             }>
                                                                                                                 <button
-                                                                                                                    class="p-2 rounded transition-colors flex items-center justify-center"
+                                                                                                                    class="icon-btn"
                                                                                                                     style="background-color: transparent;"
                                                                                                                     on:click={
                                                                                                                         let handle_stream_local = handle_stream_for_file.clone();
@@ -4923,6 +4940,43 @@ pub fn DownloadsTable(
                                         }
                                     }
                                 </For>
+                                <Show when=move || {
+                                    !loading.get()
+                                        && filtered_downloads.get().is_empty()
+                                        && !downloads.get().is_empty()
+                                }>
+                                    <tr>
+                                        <td colspan="8" class="px-6 py-16 text-center">
+                                            <p class="text-sm mb-4" style="color: var(--text-secondary);">
+                                                "No downloads match these filters"
+                                            </p>
+                                            <button
+                                                type="button"
+                                                class="px-4 py-2 text-sm rounded-lg transition-colors"
+                                                style="background-color: transparent; border: 1px solid var(--border-secondary); color: var(--text-primary);"
+                                                on:click=move |_| {
+                                                    status_filter.set("all".to_string());
+                                                    type_filter.set("all".to_string());
+                                                }
+                                            >
+                                                "Clear filters"
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </Show>
+                                <Show when=move || {
+                                    !loading.get()
+                                        && downloads.get().is_empty()
+                                        && error.get().is_none()
+                                }>
+                                    <tr>
+                                        <td colspan="8" class="px-6 py-16 text-center">
+                                            <p class="text-sm" style="color: var(--text-secondary);">
+                                                "No downloads yet"
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </Show>
                             </tbody>
                         </table>
                     </div>

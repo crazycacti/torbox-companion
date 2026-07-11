@@ -2,7 +2,7 @@
 use axum::{
     extract::Query,
     http::{HeaderMap, StatusCode},
-    response::Json,
+    response::{IntoResponse, Json},
     Router,
 };
 #[cfg(feature = "ssr")]
@@ -193,7 +193,7 @@ async fn handle_usenet_download(
 }
 
 #[cfg(feature = "ssr")]
-fn extract_api_key(headers: &HeaderMap, query_map: &std::collections::HashMap<String, String>) -> Option<String> {
+fn extract_api_key(headers: &HeaderMap) -> Option<String> {
     if let Some(auth_header) = headers.get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if auth_str.starts_with("Bearer ") {
@@ -201,18 +201,42 @@ fn extract_api_key(headers: &HeaderMap, query_map: &std::collections::HashMap<St
             }
         }
     }
-    
+
     if let Some(api_key_header) = headers.get("x-api-key") {
         if let Ok(key_str) = api_key_header.to_str() {
             return Some(key_str.to_string());
         }
     }
-    
-    if let Some(key) = query_map.get("api_key") {
-        return Some(key.clone());
-    }
-    
+
     None
+}
+
+#[cfg(feature = "ssr")]
+fn missing_api_key_response() -> axum::response::Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(DownloadResponse {
+            success: false,
+            error: Some("API key is required".to_string()),
+            detail: "Missing API key".to_string(),
+            data: None,
+        }),
+    )
+        .into_response()
+}
+
+#[cfg(feature = "ssr")]
+fn missing_param_response(param: &str) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(DownloadResponse {
+            success: false,
+            error: Some(format!("{param} is required")),
+            detail: format!("Missing {param} parameter"),
+            data: None,
+        }),
+    )
+        .into_response()
 }
 
 #[cfg(feature = "ssr")]
@@ -227,19 +251,15 @@ pub fn create_download_routes() -> Router<()> {
 async fn handle_torrent_download_with_key(
     headers: HeaderMap,
     Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<DownloadResponse>, StatusCode> {
-    let api_key = match extract_api_key(&headers, &query) {
-        Some(key) => key,
-        None => {
-            return Ok(Json(DownloadResponse {
-                success: false,
-                error: Some("API key is required".to_string()),
-                detail: "Missing API key".to_string(),
-                data: None,
-            }));
-        }
+) -> impl IntoResponse {
+    let Some(api_key) = extract_api_key(&headers) else {
+        return missing_api_key_response();
     };
-    
+
+    if query.get("torrent_id").and_then(|s| s.parse::<i32>().ok()).is_none() {
+        return missing_param_response("torrent_id");
+    }
+
     let download_params = DownloadQuery {
         torrent_id: query.get("torrent_id").and_then(|s| s.parse().ok()),
         web_id: None,
@@ -247,27 +267,26 @@ async fn handle_torrent_download_with_key(
         file_id: query.get("file_id").and_then(|s| s.parse().ok()),
         zip_link: query.get("zip_link").and_then(|s| s.parse().ok()),
     };
-    
-    handle_torrent_download(headers, Query(download_params), api_key).await
+
+    match handle_torrent_download(headers, Query(download_params), api_key).await {
+        Ok(json) => json.into_response(),
+        Err(status) => status.into_response(),
+    }
 }
 
 #[cfg(feature = "ssr")]
 async fn handle_web_download_with_key(
     headers: HeaderMap,
     Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<DownloadResponse>, StatusCode> {
-    let api_key = match extract_api_key(&headers, &query) {
-        Some(key) => key,
-        None => {
-            return Ok(Json(DownloadResponse {
-                success: false,
-                error: Some("API key is required".to_string()),
-                detail: "Missing API key".to_string(),
-                data: None,
-            }));
-        }
+) -> impl IntoResponse {
+    let Some(api_key) = extract_api_key(&headers) else {
+        return missing_api_key_response();
     };
-    
+
+    if query.get("web_id").and_then(|s| s.parse::<i32>().ok()).is_none() {
+        return missing_param_response("web_id");
+    }
+
     let download_params = DownloadQuery {
         torrent_id: None,
         web_id: query.get("web_id").and_then(|s| s.parse().ok()),
@@ -275,27 +294,26 @@ async fn handle_web_download_with_key(
         file_id: query.get("file_id").and_then(|s| s.parse().ok()),
         zip_link: query.get("zip_link").and_then(|s| s.parse().ok()),
     };
-    
-    handle_web_download(headers, Query(download_params), api_key).await
+
+    match handle_web_download(headers, Query(download_params), api_key).await {
+        Ok(json) => json.into_response(),
+        Err(status) => status.into_response(),
+    }
 }
 
 #[cfg(feature = "ssr")]
 async fn handle_usenet_download_with_key(
     headers: HeaderMap,
     Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<DownloadResponse>, StatusCode> {
-    let api_key = match extract_api_key(&headers, &query) {
-        Some(key) => key,
-        None => {
-            return Ok(Json(DownloadResponse {
-                success: false,
-                error: Some("API key is required".to_string()),
-                detail: "Missing API key".to_string(),
-                data: None,
-            }));
-        }
+) -> impl IntoResponse {
+    let Some(api_key) = extract_api_key(&headers) else {
+        return missing_api_key_response();
     };
-    
+
+    if query.get("usenet_id").and_then(|s| s.parse::<i32>().ok()).is_none() {
+        return missing_param_response("usenet_id");
+    }
+
     let download_params = DownloadQuery {
         torrent_id: None,
         web_id: None,
@@ -303,7 +321,10 @@ async fn handle_usenet_download_with_key(
         file_id: query.get("file_id").and_then(|s| s.parse().ok()),
         zip_link: query.get("zip_link").and_then(|s| s.parse().ok()),
     };
-    
-    handle_usenet_download(headers, Query(download_params), api_key).await
+
+    match handle_usenet_download(headers, Query(download_params), api_key).await {
+        Ok(json) => json.into_response(),
+        Err(status) => status.into_response(),
+    }
 }
 

@@ -21,21 +21,23 @@ pub fn MainDashboard() -> impl IntoView {
             <DashboardHeader/>
             
             <main class="p-4 sm:p-5 md:p-6">
-                <Show when=move || active_tab.get() == "overview">
-                    <OverviewTab/>
-                </Show>
-                
-                <Show when=move || active_tab.get() == "user">
-                    <UsersTab/>
-                </Show>
-                
-                <Show when=move || active_tab.get() == "themes">
-                    <ThemesTab/>
-                </Show>
-                
-                <Show when=move || active_tab.get() == "automations">
-                    <AutomationsTab/>
-                </Show>
+                <div class="max-w-7xl mx-auto w-full">
+                    <Show when=move || active_tab.get() == "overview">
+                        <OverviewTab/>
+                    </Show>
+                    
+                    <Show when=move || active_tab.get() == "user">
+                        <UsersTab/>
+                    </Show>
+                    
+                    <Show when=move || active_tab.get() == "themes">
+                        <ThemesTab/>
+                    </Show>
+                    
+                    <Show when=move || active_tab.get() == "automations">
+                        <AutomationsTab/>
+                    </Show>
+                </div>
             </main>
         </div>
     }

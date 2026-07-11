@@ -1005,23 +1005,31 @@ pub fn AutomationsTab() -> impl IntoView {
                                                 </div>
                                             </div>
                                             <div class="flex items-center gap-3 flex-wrap">
-                                                <button
-                                                    class="px-4 py-2 text-sm font-medium rounded-lg transition-all shrink-0 border"
-                                                    style={move || {
-                                                        if rule.enabled {
-                                                            "background-color: var(--bg-secondary); color: var(--text-secondary); border-color: var(--border-secondary); line-height: 1.5;"
-                                                        } else {
-                                                            "background-color: var(--bg-success); color: var(--text-success); border-color: var(--border-success); line-height: 1.5;"
-                                                        }
-                                                    }}
-                                                    on:click=move |_| {
-                                                        if let Some(id) = rule_id {
-                                                            toggle_rule(id, rule.enabled, rule.clone());
-                                                        }
+                                                {
+                                                    let rule_for_switch = rule.clone();
+                                                    let rule_enabled = rule.enabled;
+                                                    view! {
+                                                        <div class="switch-row shrink-0" style="min-height: auto; gap: 0.75rem;">
+                                                            <span class="text-xs font-medium" style="color: var(--text-secondary);">
+                                                                {if rule_enabled { "On" } else { "Off" }}
+                                                            </span>
+                                                            <label class="switch" title={if rule_enabled { "Disable rule" } else { "Enable rule" }}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    role="switch"
+                                                                    prop:checked=rule_enabled
+                                                                    on:change=move |_| {
+                                                                        if let Some(id) = rule_id {
+                                                                            toggle_rule(id, rule_for_switch.enabled, rule_for_switch.clone());
+                                                                        }
+                                                                    }
+                                                                />
+                                                                <span class="switch-track" aria-hidden="true"></span>
+                                                                <span class="switch-thumb" aria-hidden="true"></span>
+                                                            </label>
+                                                        </div>
                                                     }
-                                                >
-                                                    {if rule.enabled { "Disable" } else { "Enable" }}
-                                                </button>
+                                                }
                                                 <button
                                                     class="px-4 py-2 text-sm font-medium rounded-lg transition-all shrink-0 border hover:opacity-90"
                                                     style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border-secondary); line-height: 1.5;"
@@ -1451,18 +1459,26 @@ fn RuleModal(
                                         </p>
                                     </div>
 
-                                    <div class="flex items-center p-4 rounded-lg border" style="background-color: var(--bg-tertiary); border-color: var(--border-secondary); margin-top: 1.5rem;">
-                                        <input
-                                            type="checkbox"
-                                            id="rule-enabled"
-                                            class="w-5 h-5 rounded cursor-pointer"
-                                            style="accent-color: var(--accent-primary);"
-                                            checked=move || rule_enabled.get()
-                                            on:change=move |ev| rule_enabled.set(event_target_checked(&ev))
-                                            disabled=move || saving.get()
-                                        />
-                                        <label for="rule-enabled" class="ml-3.5 text-sm font-medium cursor-pointer" style="color: var(--text-primary); line-height: 1.5;">
-                                            "Enable this rule"
+                                    <div class="switch-row py-3 border-t" style="border-color: var(--border-secondary); margin-top: 1.5rem;">
+                                        <div class="switch-row-label">
+                                            <span id="rule-enabled-label" class="text-sm font-medium" style="color: var(--text-primary);">
+                                                "Enable this rule"
+                                            </span>
+                                            <p class="switch-row-hint">
+                                                "Run on schedule when active"
+                                            </p>
+                                        </div>
+                                        <label class="switch" aria-labelledby="rule-enabled-label" title="Enable this rule">
+                                            <input
+                                                type="checkbox"
+                                                id="rule-enabled"
+                                                role="switch"
+                                                prop:checked=move || rule_enabled.get()
+                                                on:change=move |ev| rule_enabled.set(event_target_checked(&ev))
+                                                disabled=move || saving.get()
+                                            />
+                                            <span class="switch-track" aria-hidden="true"></span>
+                                            <span class="switch-thumb" aria-hidden="true"></span>
                                         </label>
                                     </div>
                                 </div>

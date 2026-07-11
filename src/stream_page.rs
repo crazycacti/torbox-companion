@@ -925,7 +925,7 @@ pub fn StreamPage() -> impl IntoView {
                             
                             currentAudioIndex = newAudioIndex;
                             
-                            const url = `https://api.torbox.app/v1/api/stream/getstreamdata?token=${encodeURIComponent(userToken)}&presigned_token=${encodeURIComponent(presignedToken)}&chosen_audio_index=${newAudioIndex}${currentSubtitleIndex !== null ? '&chosen_subtitle_index=' + currentSubtitleIndex : ''}`;
+                            const url = `/api/v1/api/stream/getstreamdata?token=${encodeURIComponent(userToken)}&presigned_token=${encodeURIComponent(presignedToken)}&chosen_audio_index=${newAudioIndex}${currentSubtitleIndex !== null ? '&chosen_subtitle_index=' + currentSubtitleIndex : ''}`;
                             
                             try {
                                 const response = await fetch(url, {
@@ -1038,7 +1038,7 @@ pub fn StreamPage() -> impl IntoView {
                             
                             currentSubtitleIndex = newSubtitleIndex;
                             const subtitleParam = newSubtitleIndex !== null ? `&chosen_subtitle_index=${newSubtitleIndex}` : '';
-                            const url = `https://api.torbox.app/v1/api/stream/getstreamdata?token=${encodeURIComponent(userToken)}&presigned_token=${encodeURIComponent(presignedToken)}${subtitleParam}&chosen_audio_index=${currentAudioIndex !== null ? currentAudioIndex : 0}`;
+                            const url = `/api/v1/api/stream/getstreamdata?token=${encodeURIComponent(userToken)}&presigned_token=${encodeURIComponent(presignedToken)}${subtitleParam}&chosen_audio_index=${currentAudioIndex !== null ? currentAudioIndex : 0}`;
                             
                             try {
                                 const response = await fetch(url, {

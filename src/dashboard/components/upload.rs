@@ -354,15 +354,36 @@ pub fn UploadComponent() -> impl IntoView {
     view! {
         <div class="w-full mb-4 sm:mb-6" style="position: relative; z-index: 5;">
             <div class="rounded-xl border" style="background-color: var(--bg-card); border-color: var(--border-secondary); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);">
-                <div class="px-4 py-4">
-                    <div class="flex items-center justify-between gap-4 cursor-pointer" on:click=toggle_collapse style="user-select: none;">
-                        <h3 class="text-base lg:text-lg font-semibold" style="color: var(--text-primary); pointer-events: none;">
-                            "Upload"
-                        </h3>
-                        <div class="text-lg transition-transform" style={move || if is_collapsed.get() { "transform: rotate(0deg); color: var(--text-secondary); pointer-events: none;" } else { "transform: rotate(180deg); color: var(--text-secondary); pointer-events: none;" }}>
-                            "▼"
+                <div class="px-2 sm:px-4 py-2">
+                    <button
+                        type="button"
+                        class="w-full flex items-center justify-between gap-4 px-2 rounded-lg transition-colors chart-toggle"
+                        on:click=toggle_collapse
+                        aria-expanded=move || !is_collapsed.get()
+                        aria-label="Toggle upload panel"
+                    >
+                        <div class="min-w-0 text-left">
+                            <h3 class="text-base lg:text-lg font-semibold" style="color: var(--text-primary);">
+                                "Upload"
+                            </h3>
+                            <Show when=move || is_collapsed.get()>
+                                <p class="text-xs sm:text-sm mt-1" style="color: var(--text-secondary);">
+                                    "Torrents, NZB, and web links"
+                                </p>
+                            </Show>
                         </div>
-                    </div>
+                        <span
+                            class="icon-btn"
+                            style={move || if is_collapsed.get() {
+                                "pointer-events: none; transform: rotate(0deg);"
+                            } else {
+                                "pointer-events: none; transform: rotate(180deg);"
+                            }}
+                            aria-hidden="true"
+                        >
+                            "▼"
+                        </span>
+                    </button>
                 </div>
                 
                 <Show when=move || !is_collapsed.get()>
