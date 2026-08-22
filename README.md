@@ -1,3 +1,5 @@
+
+
 # Torbox Companion
 
 An alternative UI for TorBox. Manage downloads, streaming, and automation rules.
@@ -10,7 +12,7 @@ An alternative UI for TorBox. Manage downloads, streaming, and automation rules.
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) (latest stable)
+- [Rust](https://www.rust-lang.org/tools/install) (nightly; the Leptos `nightly` feature is enabled)
 - [cargo-leptos](https://github.com/leptos-rs/cargo-leptos)
 - Docker (optional)
 
