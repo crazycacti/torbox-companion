@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     cargo install cargo-chef --version ^0.1 && \
-    cargo install cargo-leptos --locked && \
+    cargo install cargo-leptos --version 0.3.7 --locked && \
     cargo install wasm-pack --version 0.12.1 && \
     rustup target add wasm32-unknown-unknown
 
