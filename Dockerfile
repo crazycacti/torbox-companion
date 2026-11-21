@@ -87,7 +87,7 @@ RUN --mount=type=cache,target=/app/target \
     cp -r target/site /app/build-output/ && \
     echo "Build artifacts copied to filesystem"'
 
-FROM gcr.io/distroless/cc-debian12
+FROM gcr.io/distroless/cc-debian13
 
 ARG BUILD_DATE
 ARG VCS_REF
